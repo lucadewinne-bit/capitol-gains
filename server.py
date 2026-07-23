@@ -1173,6 +1173,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/reingest":
                 start_ingest_background()
                 self.send_json({"ok": True})
+            elif path == "/health":
+                self.send_json({"ok": True,
+                                "ingesting": _ingest_state.get("ingesting", False)})
             else:
                 self.serve_static(path)
         except BrokenPipeError:
@@ -1182,6 +1185,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "{}: {}".format(type(e).__name__, e)}, 500)
             except Exception:
                 pass
+
+    def do_HEAD(self):
+        # uptime monitors often probe with HEAD; answer without a body
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
 
     def serve_static(self, path):
         if path == "/":
@@ -1196,6 +1205,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", CONTENT_TYPES.get(ext, "application/octet-stream"))
         self.send_header("Content-Length", str(len(body)))
+        # html always revalidates so deploys show up; other assets cache briefly
+        self.send_header("Cache-Control",
+                         "no-cache" if ext == ".html" else "public, max-age=3600")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1205,8 +1217,12 @@ def main():
         print("WARNING: pypdf not installed — run: pip3 install --user pypdf")
     init_db()
     start_ingest_background()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print("Capitol Gains running at http://localhost:{}".format(PORT))
+    # Hosted platforms (e.g. Render) set PORT and need us reachable from outside;
+    # locally we stay loopback-only on 8642.
+    port = int(os.environ.get("PORT", PORT))
+    host = "0.0.0.0" if "PORT" in os.environ else "127.0.0.1"
+    server = ThreadingHTTPServer((host, port), Handler)
+    print("Capitol Gains running at http://localhost:{}".format(port))
     print("Ingesting House + Senate disclosures in the background (first run ~a few minutes).")
     server.serve_forever()
 
