@@ -125,7 +125,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
 .tooltip .t-date { color: var(--muted); margin-bottom: 3px; }
 .tooltip .t-row { display: flex; align-items: center; gap: 6px; }
 .tooltip .chip { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* horizontal bars (single measure -> single hue) */
 .hbar-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; padding: 3px 0; font-size: 13.5px; }
@@ -226,3 +226,40 @@ footer {
   max-width: 1100px; margin: 0 auto; padding: 10px 20px 30px;
   color: var(--muted); font-size: 12.5px;
 }
+
+/* ingestion status banner */
+.ingest-banner {
+  max-width: 1100px; margin: -8px auto 16px; padding: 9px 20px;
+  background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--ink-2); font-size: 13px; display: flex; align-items: center; gap: 9px;
+}
+.spin {
+  width: 13px; height: 13px; border-radius: 50%; flex: none;
+  border: 2px solid var(--baseline); border-top-color: var(--series-1);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.done-check { color: var(--up); font-weight: 700; }
+
+/* alerts / "new since last visit" */
+.alerts .alert-lead { margin: 2px 0 10px; color: var(--ink); font-size: 14px; }
+.alert-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 800px) { .alert-cols { grid-template-columns: 1fr; } }
+.alert-col h4 { margin: 4px 0 6px; font-size: 12.5px; color: var(--ink-2); }
+.alert-list { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); }
+.alert-list li { margin: 4px 0; }
+.alerts h4 { margin: 14px 0 4px; font-size: 13px; color: var(--ink); }
+
+/* clickable member + ticker links */
+.member-link { color: var(--series-1); font-weight: 600; cursor: pointer; }
+.tickerlink { color: var(--series-1); font-weight: 650; cursor: pointer; }
+td .tickerlink { font-weight: 650; }
+a.hbar-tick { color: var(--series-1); }
+
+/* member profile page */
+.back-btn { margin-bottom: 12px; }
+.member-head h2 { font-size: 22px; margin-bottom: 2px; }
+.member-head .meta { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.filinglist { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); max-height: 320px; overflow-y: auto; }
+.filinglist li { margin: 4px 0; }
+.tile .label .term { border: none; color: var(--muted); cursor: help; }

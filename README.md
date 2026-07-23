@@ -10,13 +10,22 @@ scores measure attention in public data; they are not predictions or recommendat
 ## What it shows
 
 - **Signals** — tickers ranked by a transparent 0–100 "signal strength" that combines
-  congressional buying, policy activity in the ticker's sector, and price momentum
-  vs. the S&P 500 — each with plain-English reasons why, and what could go wrong.
-- **Weekly Brief** — a plain-English summary of the last 7 days: market move, new
-  congressional trades, bills that moved, and the most active news sector.
-- **Congress Trades** — stock trades by members of the U.S. House, parsed directly
-  from the official STOCK Act disclosure PDFs (disclosures-clerk.house.gov).
-  Disclosures lag the actual trade by up to 45 days by law.
+  congressional buying (over a trailing 90-day window, computed from the full trade
+  database), policy activity in the ticker's sector, and price momentum vs. the S&P 500 —
+  each with plain-English reasons why, and what could go wrong.
+- **Weekly Brief + "New since your last visit"** — a plain-English summary of the last
+  7 days, plus an alerts feed showing exactly what trades and filings are new since you
+  last opened the app (tracked in your browser).
+- **Congress Trades** — stock trades by members of **both** the U.S. House (official
+  Clerk STOCK Act PDFs) and the U.S. Senate (official eFD electronic filings), parsed
+  directly from the source and stored once in a local SQLite database (`capitol.db`), so
+  nothing is re-parsed twice. Every 2025 and 2026 periodic transaction report is ingested,
+  tagged with its chamber, and searchable across the whole database. Scanned paper filings
+  can't be parsed and are flagged as such with a link to the original. Disclosures lag the
+  actual trade by up to 45 days by law.
+- **Politician pages** — click any member's name anywhere in the app to see their profile:
+  every trade, most-traded tickers, estimated buy/sell volume, and links to every original
+  filing. Public-record research only — not a claim of wrongdoing.
 - **Legislation** — bills with recent status changes (GovTrack), tagged with sectors
   they might affect and broad sector ETFs as research starting points.
 - **News** — political headlines from Politico and The Hill, tagged by sector.
@@ -32,9 +41,12 @@ pip3 install --user pypdf   # one-time
 python3 server.py           # then open http://localhost:8642
 ```
 
-No API keys needed. All sources are free public data (House Clerk, GovTrack,
-Politico/The Hill RSS, Yahoo Finance). Responses are cached in `.cache/`; the first
-load of congressional trades downloads ~30 filing PDFs (~30 seconds), then it's fast.
+No API keys needed. All sources are free public data (House Clerk, Senate eFD, GovTrack,
+Politico/The Hill RSS, Yahoo Finance). PDFs/HTML are cached in `.cache/` and parsed trades
+are stored in `capitol.db`. On first run the server ingests **every** 2025–2026 House and
+Senate periodic transaction report in the background (~1,000+ filings, a few minutes) — the
+page stays usable while a progress banner fills in, and subsequent runs are instant because
+nothing is re-parsed. `.cache/` and `capitol.db` are git-ignored.
 
 ## Hosting it later (website / app)
 

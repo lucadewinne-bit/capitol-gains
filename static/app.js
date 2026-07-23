@@ -159,6 +159,9 @@ const TERMS = {
   stockact: "2012 law requiring members of Congress to publicly disclose their stock trades within 45 days.",
   ptr: "Periodic Transaction Report — the official form a member of Congress files to disclose a trade.",
   benchmark: "The yardstick you compare results against — here, putting the same money into the S&P 500 instead.",
+  efd: "Electronic Financial Disclosure — the U.S. Senate's public system where senators file their trade disclosures (efdsearch.senate.gov).",
+  chamber: "Which half of Congress a member serves in — the House of Representatives or the Senate.",
+  volume: "Estimated dollars traded. Filings report amounts in ranges (e.g. $15,001–$50,000), so we use the midpoint — it's an estimate, not an exact figure.",
 };
 function showTermTip(el) {
   const def = TERMS[el.dataset.term];
@@ -182,10 +185,13 @@ document.addEventListener("mouseout", e => {
 
 // ----------------------------------------------------------------- tabs --
 const loaded = {};
+let prevTab = "overview";
 function activateTab(name) {
+  if (name !== "member") prevTab = name;
   $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   $$(".tabpanel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
-  loadTab(name);
+  window.scrollTo(0, 0);
+  if (name !== "member") loadTab(name);
 }
 $("#tabs").addEventListener("click", e => {
   const btn = e.target.closest(".tab");
@@ -196,6 +202,82 @@ function loadTab(name) {
   loaded[name] = true;
   ({ overview: loadOverview, signals: loadSignals, trades: loadTrades,
      bills: loadBills, news: loadNews, plan: loadPlan }[name] || (() => {}))();
+}
+
+// -------------------------------------------------------- member profiles --
+// Any element with data-member-key opens that politician's profile.
+document.addEventListener("click", e => {
+  const el = e.target.closest && e.target.closest("[data-member-key]");
+  if (!el) return;
+  e.preventDefault();
+  openMember(el.dataset.memberKey);
+});
+$("#member-back").addEventListener("click", () => activateTab(prevTab));
+
+async function openMember(key) {
+  const body = $("#member-body");
+  body.innerHTML = '<p class="loading">Loading member&hellip;</p>';
+  activateTab("member");
+  try {
+    const m = await getJSON("/api/member?key=" + encodeURIComponent(key));
+    renderMember(m);
+  } catch (err) {
+    body.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+function renderMember(m) {
+  const t = m.totals;
+  const where = [m.chambers.join(" & ")].concat(m.states.length ? m.states.join(", ") : [])
+    .filter(Boolean).join(" · ");
+  const tiles = [
+    { label: "Trades on record", value: t.trades.toLocaleString() },
+    { label: "Buys / Sells", value: `${t.buys} / ${t.sells}` },
+    { label: "Est. buy volume", value: fmtUSD(t.buy_est), term: "volume" },
+    { label: "Est. sell volume", value: fmtUSD(t.sell_est), term: "volume" },
+    { label: "Filings", value: t.filings.toLocaleString() },
+  ];
+  const maxC = Math.max(1, ...m.top_tickers.map(x => x.count));
+  const tickers = m.top_tickers.map(x =>
+    `<div class="hbar-row" title="${x.count} trade(s), est buys ${fmtUSD(x.buy_est)}, est sells ${fmtUSD(x.sell_est)}">` +
+    `<a class="hbar-tick tickerlink" href="#" data-goto-trades="${esc(x.ticker)}">${esc(x.ticker)}</a>` +
+    `<span class="hbar-track"><span class="hbar-fill" style="width:${(x.count / maxC) * 100}%"></span></span>` +
+    `<span class="hbar-val">${x.count}× · est ${fmtUSD(x.buy_est + x.sell_est)}</span></div>`).join("");
+  const trows = m.trades.map(tr =>
+    `<tr><td class="ticker"><a href="#" class="tickerlink" data-goto-trades="${esc(tr.ticker)}">${esc(tr.ticker)}</a></td>` +
+    `<td>${esc(tr.asset)}</td>` +
+    `<td class="${tr.side === "BUY" ? "side-buy" : tr.side === "SELL" ? "side-sell" : ""}">${esc(tr.side)}</td>` +
+    `<td>${esc(tr.owner || "")}</td>` +
+    `<td class="num">${esc(tr.traded)}</td>` +
+    `<td class="num">${fmtUSD(tr.amount_low)}–${fmtUSD(tr.amount_high)}</td>` +
+    `<td><a href="${esc(tr.doc_url)}" target="_blank" rel="noopener">filing</a></td></tr>`).join("");
+  const filings = m.filings.map(f =>
+    `<li><a href="${esc(f.doc_url)}" target="_blank" rel="noopener">${esc(f.chamber)} filing · ${esc(f.filed || "—")}</a>` +
+    ` <span class="sub">(${f.trade_count} trade${f.trade_count === 1 ? "" : "s"}${f.paper ? ", scanned paper" : ""})</span></li>`).join("");
+
+  $("#member-body").innerHTML = `
+    <div class="card member-head">
+      <h2>${esc(m.name)}</h2>
+      <div class="meta">${esc(where)} · trades from ${esc(t.first_trade || "—")} to ${esc(t.last_trade || "—")}</div>
+      <p class="note">All figures are estimates from official disclosures, which report amounts in ranges and
+        lag the actual trade by up to 45 days. Members trade for many reasons (rebalancing, a spouse&rsquo;s job);
+        this is public-record research, <strong>not</strong> a claim of wrongdoing or a recommendation.</p>
+    </div>
+    <div class="tiles">${tiles.map(x =>
+      `<div class="tile"><div class="label">${esc(x.label)}${x.term ? ` <span class="term" data-term="${x.term}">?</span>` : ""}</div>` +
+      `<div class="value">${esc(x.value)}</div></div>`).join("")}</div>
+    <div class="twocol">
+      <div class="card"><h3>Most-traded tickers</h3>${tickers || '<p class="loading">None.</p>'}</div>
+      <div class="card"><h3>Original filings <span class="sub">(${m.filings.length} shown)</span></h3>
+        <ul class="filinglist">${filings || "<li>None.</li>"}</ul></div>
+    </div>
+    <div class="card">
+      <h3>All trades <span class="sub">(${m.trades.length} shown, newest first)</span></h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Ticker</th><th>Asset</th><th>Side</th><th>Owner</th>
+        <th>Trade date</th><th>Amount</th><th>Filing</th></tr></thead>
+        <tbody>${trows}</tbody></table></div>
+    </div>`;
 }
 
 // -------------------------------------------------------------- overview --
@@ -220,7 +302,7 @@ function renderOverviewTiles(h) {
     { label: "S&P 500 close", value: last.toLocaleString("en-US", { maximumFractionDigits: 0 }) },
     { label: "1-day change", value: fmtPct((last - prev) / prev), delta: last - prev >= 0 ? "up" : "down" },
     { label: spxRange.toUpperCase() + " return", value: fmtPct((last - first) / first), delta: last - first >= 0 ? "up" : "down" },
-    { label: "Congress PTR filings (YTD)", value: window._ptrCount || "…", id: "tile-ptr" },
+    { label: "Filings in database", value: window._ptrCount || "…", id: "tile-ptr" },
   ];
   $("#ov-tiles").innerHTML = tiles.map(t =>
     `<div class="tile"${t.id ? ` id="${t.id}"` : ""}><div class="label">${esc(t.label)}</div>` +
@@ -273,22 +355,76 @@ async function loadOverview() {
     $("#ov-news").innerHTML = n.items.slice(0, 6).map(newsItemHTML).join("") || "No headlines.";
   }).catch(e => { $("#ov-news").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   getJSON("/api/trades").then(t => {
-    window._ptrCount = String(t.total_ptr_filings_this_year);
+    window._ptrCount = (t.house_filings + t.senate_filings).toLocaleString();
     const tile = $("#tile-ptr .value"); if (tile) tile.textContent = window._ptrCount;
-    $("#ov-topbuys").innerHTML = hbarsHTML(t.top_buys.slice(0, 6)) ||
-      '<p class="loading">No parsed buys in the latest filings.</p>';
+    $("#ov-topbuys").innerHTML = tickerBarsHTML(t.top_buys.slice(0, 6)) ||
+      '<p class="loading">No parsed buys yet.</p>';
   }).catch(e => { $("#ov-topbuys").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+  loadAlerts();
 }
 
-function hbarsHTML(rows) {
-  if (!rows || !rows.length) return "";
-  const maxC = Math.max(...rows.map(r => r.count));
-  return rows.map(r =>
-    `<div class="hbar-row" title="${r.count} trade(s) by ${r.members} member(s), est. total ${fmtUSD(r.est_total)}">` +
-    `<span class="hbar-tick">${esc(r.ticker)}</span>` +
-    `<span class="hbar-track"><span class="hbar-fill" style="width:${(r.count / maxC) * 100}%"></span></span>` +
-    `<span class="hbar-val">${r.count}× · est ${fmtUSD(r.est_total)}</span></div>`).join("");
+// ------------------------------------------------------- alerts / "new" --
+const VISIT_KEY = "capitol_last_visit";
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function loadAlerts() {
+  const last = localStorage.getItem(VISIT_KEY);  // null on first visit
+  const url = "/api/alerts" + (last ? "?since=" + encodeURIComponent(last) : "");
+  const body = $("#alerts-body");
+  fetch(url).then(r => r.json()).then(a => {
+    if (a.error) throw new Error(a.error);
+    $("#alerts-since").textContent = last
+      ? `since ${a.since}` : `first visit — showing the last 7 days (from ${a.since})`;
+    if (!a.new_trades) {
+      body.innerHTML = '<p class="loading">No new trade disclosures in that window. Check back later.</p>';
+    } else {
+      const buys = a.top_buys.length
+        ? `<div class="alert-col"><h4>Most-bought (new)</h4>${tickerBarsHTML(a.top_buys)}</div>` : "";
+      const sells = a.top_sells.length
+        ? `<div class="alert-col"><h4>Most-sold (new)</h4>${tickerBarsHTML(a.top_sells)}</div>` : "";
+      const notable = a.notable.slice(0, 6).map(t =>
+        `<li><a href="#" class="member-link" data-member-key="${esc(t.member_key)}">${esc(t.member)}</a> ` +
+        `<span class="${t.side === "BUY" ? "side-buy" : "side-sell"}">${esc(t.side)}</span> ` +
+        `<a href="#" class="tickerlink" data-goto-trades="${esc(t.ticker)}">${esc(t.ticker)}</a> ` +
+        `<span class="sub">${fmtUSD(t.amount_low)}–${fmtUSD(t.amount_high)} · ${esc(t.chamber)}</span></li>`).join("");
+      body.innerHTML =
+        `<p class="alert-lead"><b>${a.new_trades.toLocaleString()}</b> new trade${a.new_trades === 1 ? "" : "s"} ` +
+        `across <b>${a.new_filings.toLocaleString()}</b> new filing${a.new_filings === 1 ? "" : "s"}.</p>` +
+        `<div class="alert-cols">${buys}${sells}</div>` +
+        (notable ? `<h4>Biggest new trades</h4><ul class="alert-list">${notable}</ul>` : "");
+    }
+    localStorage.setItem(VISIT_KEY, todayISO());
+  }).catch(e => { body.innerHTML = `<p class="error">${esc(e.message)}</p>`; });
 }
+
+// ------------------------------------------------ ingestion status banner --
+let _statusTimer = null;
+function pollStatus() {
+  fetch("/api/status").then(r => r.json()).then(s => {
+    const banner = $("#ingest-banner");
+    if (s.ingesting) {
+      banner.classList.remove("hidden");
+      const sen = (s.phase === "senate" || s.senate_total)
+        ? ` · Senate ${s.senate_parsed}/${s.senate_total || "…"}` : "";
+      banner.innerHTML = `<span class="spin"></span> Building your database from official filings — ` +
+        `House ${s.house_parsed}/${s.house_total || "…"}${sen}. Numbers fill in as they parse; the page stays usable.`;
+      _statusTimer = setTimeout(pollStatus, 2500);
+    } else if (!banner.classList.contains("hidden")) {
+      banner.innerHTML = `<span class="done-check">✓</span> Database ready: ` +
+        `${(s.db_trades || 0).toLocaleString()} trades from ${s.house_filings + s.senate_filings} filings` +
+        (s.senate_ok === false ? ` (Senate unavailable this run — House data only).` : `.`);
+      setTimeout(() => banner.classList.add("hidden"), 6000);
+      refreshAll();
+    }
+  }).catch(() => { _statusTimer = setTimeout(pollStatus, 5000); });
+}
+function refreshAll() {
+  Object.keys(jsonCache).forEach(k => { if (k.startsWith("/api/")) delete jsonCache[k]; });
+  loaded.trades = loaded.signals = false;
+  const active = $(".tab.active");
+  if (active && active.dataset.tab !== "overview") loadTab(active.dataset.tab);
+  loadOverview();
+}
+
 
 // --------------------------------------------------------------- signals --
 const pct1 = v => (v >= 0 ? "+" : "−") + (Math.abs(v) * 100).toFixed(1) + "%";
@@ -296,10 +432,15 @@ const pct1 = v => (v >= 0 ? "+" : "−") + (Math.abs(v) * 100).toFixed(1) + "%";
 function signalWhy(s, spx3m) {
   const why = [];
   if (s.buyers) {
-    let line = `<b>${s.buyers}</b> member${s.buyers > 1 ? "s" : ""} of Congress recently bought ` +
-      `an estimated <b>${fmtUSD(s.buy_total)}</b>`;
+    const chamber = s.chambers && s.chambers.length ? " (" + s.chambers.join(" + ") + ")" : "";
+    let line = `<b>${s.buyers}</b> member${s.buyers > 1 ? "s" : ""} of Congress${chamber} bought ` +
+      `an estimated <b>${fmtUSD(s.buy_total)}</b> in the last ${s.window_days || 90} days`;
     if (s.sellers) line += ` — but ${s.sellers} sold (est ${fmtUSD(s.sell_total)})`;
     why.push(line + ".");
+    if (s.buyer_names && s.buyer_names.length) {
+      why.push("Buyers: " + s.buyer_names.map(b =>
+        `<a href="#" class="member-link" data-member-key="${esc(b.key)}">${esc(b.name)}</a>`).join(", ") + ".");
+    }
   }
   if (s.sector) {
     why.push(`Its sector, <b>${esc(s.sector)}</b>, showed up in <b>${s.bills_hits}</b> recent bill${s.bills_hits === 1 ? "" : "s"} ` +
@@ -332,6 +473,7 @@ async function loadSignals() {
     const d = await getJSON("/api/signals");
     if (!d.signals.length) { el.innerHTML = '<p class="loading">No signals yet — no parsed congressional buys.</p>'; return; }
     el.innerHTML = d.signals.map((s, i) => {
+      s.window_days = d.window_days;
       const why = signalWhy(s, d.spx_r3m).map(w => `<li>${w}</li>`).join("");
       const risks = signalRisks(s).map(r => `<li>${esc(r)}</li>`).join("");
       return `<div class="card signal-card">
@@ -355,10 +497,13 @@ async function loadSignals() {
         </div>
       </div>`;
     }).join("") +
-    `<p class="note">Scoring, openly: up to 40 pts for congressional buying (10 per distinct buyer, +5 if
-     estimated total &ge; $50k, &minus;8 per seller), up to 30 pts for bills + news activity in the sector
-     (3 per item), and up to 30 pts for 3-month price <span class="term" data-term="momentum">momentum</span>
-     (15 = moving with the market, &plusmn;1 per percentage point vs the S&P 500).</p>`;
+    `<p class="note">Computed from the <b>full database</b> of House + Senate filings for 2025&ndash;2026, but the
+     congressional component counts only buying in the trailing <b>${d.window_days}</b> days (since ${esc(d.since)}),
+     so a signal reflects <em>current</em> attention. Scoring, openly: up to 40 pts for congressional buying
+     (10 per distinct buyer, +5 if estimated total &ge; $50k, &minus;8 per seller), up to 30 pts for bills + news
+     activity in the sector (3 per item), and up to 30 pts for 3-month price
+     <span class="term" data-term="momentum">momentum</span> (15 = moving with the market, &plusmn;1 per
+     percentage point vs the S&P 500).</p>`;
   } catch (e) {
     el.innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }
@@ -366,48 +511,81 @@ async function loadSignals() {
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest("[data-goto-trades]");
   if (!b) return;
+  e.preventDefault();
   activateTab("trades");
   $("#trade-search").value = b.dataset.gotoTrades;
-  if (allTrades.length) renderTradesTable();
+  $("#trade-side").value = "";
+  $("#trade-chamber").value = "";
+  runTradeSearch();
 });
 
 // ---------------------------------------------------------------- trades --
-let allTrades = [];
 async function loadTrades() {
   try {
     const t = await getJSON("/api/trades");
-    allTrades = t.trades;
+    const paper = t.paper_filings
+      ? ` ${t.paper_filings} filings are scanned paper documents we can't parse — open their link to read them.` : "";
     $("#trades-meta").innerHTML =
-      `${t.total_ptr_filings_this_year} trade filings so far this year. Showing the ` +
-      `${t.filings_parsed} most recent electronic filings (${t.trades.length} trades). ` +
-      `${t.filings_paper_only ? t.filings_paper_only + " recent filings are scanned paper documents — open the PDF link to read them." : ""}` +
-      ` Disclosures lag the actual trade by up to 45 days.`;
-    $("#top-buys").innerHTML = hbarsHTML(t.top_buys) || '<p class="loading">None in latest filings.</p>';
-    $("#top-sells").innerHTML = hbarsHTML(t.top_sells) || '<p class="loading">None in latest filings.</p>';
-    renderTradesTable();
+      `<b>${t.total_trades.toLocaleString()}</b> trades parsed from <b>${t.house_filings.toLocaleString()}</b> House ` +
+      `and <b>${t.senate_filings.toLocaleString()}</b> Senate filings, across <b>${t.members.toLocaleString()}</b> members ` +
+      `(2025&ndash;2026).${paper} Disclosures lag the actual trade by up to 45 days.`;
+    $("#top-buys").innerHTML = tickerBarsHTML(t.top_buys) || '<p class="loading">None yet.</p>';
+    $("#top-sells").innerHTML = tickerBarsHTML(t.top_sells) || '<p class="loading">None yet.</p>';
+    runTradeSearch();
   } catch (e) {
-    $("#trades-table tbody").innerHTML = `<tr><td colspan="7" class="error">${esc(e.message)}</td></tr>`;
+    $("#trades-table tbody").innerHTML = `<tr><td colspan="8" class="error">${esc(e.message)}</td></tr>`;
   }
 }
-function renderTradesTable() {
-  const q = $("#trade-search").value.trim().toLowerCase();
-  const side = $("#trade-side").value;
-  const rows = allTrades.filter(t =>
-    (!side || t.side === side) &&
-    (!q || t.ticker.toLowerCase().includes(q) || t.member.toLowerCase().includes(q))
-  ).slice(0, 250);
-  $("#trades-table tbody").innerHTML = rows.map(t =>
-    `<tr><td>${esc(t.member)} <span class="sub">${esc(t.state)}</span></td>` +
-    `<td class="ticker">${esc(t.ticker)}</td>` +
-    `<td>${esc(t.asset)}</td>` +
-    `<td class="${t.side === "BUY" ? "side-buy" : t.side === "SELL" ? "side-sell" : ""}">${esc(t.side)}</td>` +
-    `<td class="num">${esc(t.traded)}</td>` +
-    `<td class="num">${fmtUSD(t.amount_low)}–${fmtUSD(t.amount_high)}</td>` +
-    `<td><a href="${esc(t.doc_url)}" target="_blank" rel="noopener">PDF</a></td></tr>`
-  ).join("") || `<tr><td colspan="7" class="loading">No trades match.</td></tr>`;
+let _tradeSearchTimer = null;
+function memberCell(t) {
+  return `<a href="#" class="member-link" data-member-key="${esc(t.member_key)}">${esc(t.member)}</a>` +
+    (t.state ? ` <span class="sub">${esc(t.state)}</span>` : "");
 }
-$("#trade-search").addEventListener("input", renderTradesTable);
-$("#trade-side").addEventListener("change", renderTradesTable);
+async function runTradeSearch() {
+  const q = $("#trade-search").value.trim();
+  const side = $("#trade-side").value;
+  const chamber = $("#trade-chamber").value;
+  const tbody = $("#trades-table tbody");
+  try {
+    const params = new URLSearchParams({ q, side, chamber, limit: "400" });
+    const res = await fetch("/api/trades/list?" + params.toString());
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    tbody.innerHTML = d.trades.map(t =>
+      `<tr><td>${memberCell(t)}</td>` +
+      `<td>${esc(t.chamber)}</td>` +
+      `<td class="ticker"><a href="#" class="tickerlink" data-goto-trades="${esc(t.ticker)}">${esc(t.ticker)}</a></td>` +
+      `<td>${esc(t.asset)}</td>` +
+      `<td class="${t.side === "BUY" ? "side-buy" : t.side === "SELL" ? "side-sell" : ""}">${esc(t.side)}</td>` +
+      `<td class="num">${esc(t.traded)}</td>` +
+      `<td class="num">${fmtUSD(t.amount_low)}–${fmtUSD(t.amount_high)}</td>` +
+      `<td><a href="${esc(t.doc_url)}" target="_blank" rel="noopener">filing</a></td></tr>`
+    ).join("") || `<tr><td colspan="8" class="loading">No trades match.</td></tr>`;
+    $("#trades-listnote").textContent = d.count >= d.limit
+      ? `Showing the ${d.limit} most recent matches — narrow your search to see older ones.`
+      : `${d.count} match${d.count === 1 ? "" : "es"}.`;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="error">${esc(e.message)}</td></tr>`;
+  }
+}
+function debouncedTradeSearch() {
+  clearTimeout(_tradeSearchTimer);
+  _tradeSearchTimer = setTimeout(runTradeSearch, 250);
+}
+$("#trade-search").addEventListener("input", debouncedTradeSearch);
+$("#trade-side").addEventListener("change", runTradeSearch);
+$("#trade-chamber").addEventListener("change", runTradeSearch);
+
+// horizontal ticker bars with clickable ticker -> filter trades
+function tickerBarsHTML(rows) {
+  if (!rows || !rows.length) return "";
+  const maxC = Math.max(...rows.map(r => r.count));
+  return rows.map(r =>
+    `<div class="hbar-row" title="${r.count} trade(s) by ${r.members} member(s), est. total ${fmtUSD(r.est_total)}">` +
+    `<a class="hbar-tick tickerlink" href="#" data-goto-trades="${esc(r.ticker)}">${esc(r.ticker)}</a>` +
+    `<span class="hbar-track"><span class="hbar-fill" style="width:${(r.count / maxC) * 100}%"></span></span>` +
+    `<span class="hbar-val">${r.count}× · est ${fmtUSD(r.est_total)}</span></div>`).join("");
+}
 
 // ----------------------------------------------------------------- bills --
 async function loadBills() {
@@ -618,4 +796,15 @@ $("#plan-import-file").addEventListener("change", async e => {
 });
 
 // ------------------------------------------------------------------ init --
+// Deep links: #signals, #trades, … open a tab; #member=<key> opens a profile.
+function routeFromHash() {
+  const h = decodeURIComponent((location.hash || "").slice(1));
+  if (!h) return;
+  if (h.indexOf("member=") === 0) { openMember(h.slice(7)); return; }
+  if ($(`.tab[data-tab="${h}"]`)) activateTab(h);
+}
+window.addEventListener("hashchange", routeFromHash);
+
 loadTab("overview");
+pollStatus();
+routeFromHash();

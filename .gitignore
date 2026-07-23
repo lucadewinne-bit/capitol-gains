@@ -1,3 +1,6 @@
 .cache/
 __pycache__/
 .DS_Store
+capitol.db
+capitol.db-wal
+capitol.db-shm

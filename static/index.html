@@ -30,9 +30,12 @@
   <strong>Research tool — not financial advice.</strong> Strategies that aim to beat the
   S&amp;P&nbsp;500 carry a real risk of losing money; nothing here removes that risk.
   Congressional-trade data comes from official
-  <span class="term" data-term="stockact">STOCK Act</span> filings, which are disclosed
-  30&ndash;45 days after the trade happened.
+  <span class="term" data-term="stockact">STOCK Act</span> filings — the U.S. House Clerk
+  and the U.S. Senate <span class="term" data-term="efd">eFD</span> system — which are
+  disclosed 30&ndash;45 days after the trade happened.
 </div>
+
+<div id="ingest-banner" class="ingest-banner hidden"></div>
 
 <main>
   <!-- ============================= OVERVIEW ============================= -->
@@ -40,6 +43,13 @@
     <div class="card brief">
       <h2>This week in one minute</h2>
       <div id="brief-body" class="loading">Writing your weekly brief&hellip;</div>
+    </div>
+    <div class="card alerts">
+      <div class="card-head">
+        <h2>New since your last visit</h2>
+        <span class="sub" id="alerts-since"></span>
+      </div>
+      <div id="alerts-body" class="loading">Checking what changed&hellip;</div>
     </div>
     <div class="tiles" id="ov-tiles"></div>
     <div class="card">
@@ -56,7 +66,7 @@
     </div>
     <div class="twocol">
       <div class="card">
-        <h2>Most-bought by Congress <span class="sub">(recent filings)</span></h2>
+        <h2>Most-bought by Congress <span class="sub">(House + Senate, 2025&ndash;2026)</span></h2>
         <div id="ov-topbuys" class="loading">Loading congressional filings&hellip;</div>
       </div>
       <div class="card">
@@ -82,8 +92,10 @@
   <!-- ============================= TRADES ============================= -->
   <section id="tab-trades" class="tabpanel">
     <div class="card">
-      <h2>Congressional stock trades <span class="sub">(official House STOCK Act filings)</span></h2>
+      <h2>Congressional stock trades <span class="sub">(official House Clerk &amp; Senate eFD filings)</span></h2>
       <p class="note" id="trades-meta"></p>
+      <p class="note">Most-traded tickers across <em>every</em> parsed filing for 2025&ndash;2026.
+        Click any member&rsquo;s name to open their profile.</p>
       <div class="twocol">
         <div><h3>Top buys</h3><div id="top-buys"></div></div>
         <div><h3>Top sells</h3><div id="top-sells"></div></div>
@@ -91,9 +103,14 @@
     </div>
     <div class="card">
       <div class="card-head">
-        <h2>All parsed trades</h2>
+        <h2>Search all trades</h2>
         <div class="filters">
-          <input type="text" id="trade-search" placeholder="Filter by ticker or member&hellip;">
+          <input type="text" id="trade-search" placeholder="Search ticker or member across the whole database&hellip;">
+          <select id="trade-chamber">
+            <option value="">Both chambers</option>
+            <option value="House">House</option>
+            <option value="Senate">Senate</option>
+          </select>
           <select id="trade-side">
             <option value="">All sides</option>
             <option value="BUY">Buys</option>
@@ -102,11 +119,18 @@
         </div>
       </div>
       <div class="tablewrap"><table id="trades-table">
-        <thead><tr><th>Member</th><th>Ticker</th><th>Asset</th><th>Side</th>
+        <thead><tr><th>Member</th><th>Chamber</th><th>Ticker</th><th>Asset</th><th>Side</th>
         <th>Trade date</th><th>Amount</th><th>Filing</th></tr></thead>
-        <tbody><tr><td colspan="7" class="loading">Downloading &amp; parsing official filings (first load takes ~30s)&hellip;</td></tr></tbody>
+        <tbody><tr><td colspan="8" class="loading">Downloading &amp; parsing official filings (first load takes a few minutes)&hellip;</td></tr></tbody>
       </table></div>
+      <p class="note" id="trades-listnote"></p>
     </div>
+  </section>
+
+  <!-- ===================== MEMBER PROFILE (no tab) ===================== -->
+  <section id="tab-member" class="tabpanel">
+    <button class="ghost back-btn" id="member-back">&larr; Back</button>
+    <div id="member-body" class="loading">Loading member&hellip;</div>
   </section>
 
   <!-- ============================= BILLS ============================= -->
@@ -255,7 +279,8 @@
 </main>
 
 <footer>
-  Sources: House Clerk financial disclosures &middot; GovTrack &middot; Politico &amp; The Hill RSS &middot; Yahoo Finance.
+  Sources: U.S. House Clerk financial disclosures &middot; U.S. Senate eFD &middot; GovTrack &middot;
+  Politico &amp; The Hill RSS &middot; Yahoo Finance.
   This tool surfaces public data for research and is not personalized investment advice.
 </footer>
 
