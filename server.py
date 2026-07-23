@@ -331,6 +331,169 @@ def build_news():
     return {"updated": int(time.time()), "items": items[:50]}
 
 
+# --------------------------------------------------------------- signals ----
+
+# Sector assignment for tickers commonly seen in congressional filings. Unknown
+# tickers still get congress + momentum scores; their policy score is 0.
+TICKER_SECTORS = {}
+for _sector, _tickers in {
+    "Tech & Semiconductors": ["NVDA", "APH", "ADI", "INTU", "ANET", "ACN", "GOOGL",
+                              "GOOG", "MSFT", "AAPL", "AMD", "AVGO", "NOK", "CSCO",
+                              "CRM", "NFLX", "META", "AMZN", "AMCR", "COST", "TSLA"],
+    "Defense & Aerospace": ["LHX", "LMT", "RTX", "NOC", "GD", "BA", "HII", "TXT"],
+    "Healthcare & Pharma": ["ABT", "ZTS", "UNH", "JNJ", "PFE", "LLY", "MRK", "TMO",
+                            "MDT", "ABBV", "BMY"],
+    "Financials & Crypto": ["BAC", "JPM", "GS", "MS", "SPGI", "MKL", "V", "MA",
+                            "WFC", "C", "BLK", "AXP"],
+    "Energy & Oil": ["XOM", "CVX", "COP", "SLB", "OXY", "NEE", "DUK"],
+    "Industrials & Infrastructure": ["CAT", "DE", "UNP", "GE", "ESAB", "FERG",
+                                     "ETN", "EMR", "HON", "MMM", "UPS"],
+}.items():
+    for _t in _tickers:
+        TICKER_SECTORS[_t] = _sector
+
+
+def _hist_cached(symbol, rng):
+    key = "hist_{}_{}".format(re.sub(r"[^A-Za-z0-9]", "_", symbol), rng)
+    return mem_cached(key, 3600, lambda: build_history(symbol, rng))
+
+
+def _returns(hist):
+    closes = hist.get("closes") or []
+    if len(closes) < 2:
+        return None, None
+    r3m = closes[-1] / closes[0] - 1
+    i1m = max(0, len(closes) - 22)  # ~21 trading days per month
+    r1m = closes[-1] / closes[i1m] - 1
+    return r1m, r3m
+
+
+def build_signals():
+    trades_data = mem_cached("trades", 1800, build_trades)
+    bills_data = mem_cached("bills", 1800, build_bills)
+    news_data = mem_cached("news", 900, build_news)
+    if "error" in trades_data:
+        return trades_data
+
+    # aggregate congressional interest per ticker
+    agg = {}
+    for t in trades_data["trades"]:
+        a = agg.setdefault(t["ticker"], {
+            "ticker": t["ticker"], "asset": t["asset"], "buyers": set(),
+            "sellers": set(), "buy_total": 0, "sell_total": 0, "last_trade": ""})
+        mid = (t["amount_low"] + t["amount_high"]) // 2
+        if t["side"] == "BUY":
+            a["buyers"].add(t["member"])
+            a["buy_total"] += mid
+        elif t["side"] == "SELL":
+            a["sellers"].add(t["member"])
+            a["sell_total"] += mid
+        dk = _date_key(t["traded"])
+        if dk > a["last_trade"]:
+            a["last_trade"] = dk
+
+    # policy activity per sector from bills + news sector tags
+    sector_hits = {s: {"bills": 0, "news": 0} for s in SECTORS}
+    for b in bills_data.get("bills", []):
+        for s in b["sectors"]:
+            sector_hits[s["sector"]]["bills"] += 1
+    for n in news_data.get("items", []):
+        for s in n["sectors"]:
+            sector_hits[s["sector"]]["news"] += 1
+
+    # top candidates by congressional buying, then score with momentum
+    candidates = sorted(
+        [a for a in agg.values() if a["buyers"]],
+        key=lambda a: (len(a["buyers"]), a["buy_total"]), reverse=True)[:12]
+
+    spx = _hist_cached("^GSPC", "3mo")
+    spx_r1m, spx_r3m = _returns(spx)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        hists = list(pool.map(lambda a: _hist_cached(a["ticker"], "3mo"), candidates))
+
+    signals = []
+    for a, hist in zip(candidates, hists):
+        buyers, sellers = len(a["buyers"]), len(a["sellers"])
+        congress = max(0, min(40, 10 * buyers
+                              + (5 if a["buy_total"] >= 50000 else 0)
+                              - 8 * sellers))
+        sector = TICKER_SECTORS.get(a["ticker"])
+        hits = sector_hits.get(sector, {"bills": 0, "news": 0})
+        policy = min(30, 3 * (hits["bills"] + hits["news"]))
+        r1m, r3m = _returns(hist) if "error" not in hist else (None, None)
+        if r3m is not None and spx_r3m is not None:
+            # 15 = moving with the market; +/-1 point per pct-pt vs S&P over 3 months
+            momentum = max(0, min(30, round(15 + (r3m - spx_r3m) * 100)))
+        else:
+            momentum = 15
+        etfs = SECTORS.get(sector, {}).get("etfs", "") if sector else ""
+        signals.append({
+            "ticker": a["ticker"], "asset": a["asset"], "sector": sector,
+            "sector_etfs": etfs,
+            "score": congress + policy + momentum,
+            "parts": {"congress": congress, "policy": policy, "momentum": momentum},
+            "buyers": buyers, "sellers": sellers,
+            "buy_total": a["buy_total"], "sell_total": a["sell_total"],
+            "last_trade": a["last_trade"],
+            "bills_hits": hits["bills"], "news_hits": hits["news"],
+            "r1m": r1m, "r3m": r3m,
+            "name": hist.get("name", a["ticker"]) if "error" not in hist else a["ticker"],
+        })
+    signals.sort(key=lambda s: s["score"], reverse=True)
+    return {"updated": int(time.time()), "spx_r1m": spx_r1m, "spx_r3m": spx_r3m,
+            "signals": signals}
+
+
+# ----------------------------------------------------------------- brief ----
+
+def build_brief():
+    trades_data = mem_cached("trades", 1800, build_trades)
+    bills_data = mem_cached("bills", 1800, build_bills)
+    news_data = mem_cached("news", 900, build_news)
+    week_ago = time.strftime("%Y-%m-%d", time.localtime(time.time() - 7 * 86400))
+
+    spx = _hist_cached("^GSPC", "1mo")
+    spx_close = spx_week = None
+    if "error" not in spx and len(spx.get("closes", [])) >= 6:
+        spx_close = spx["closes"][-1]
+        spx_week = spx["closes"][-1] / spx["closes"][-6] - 1  # 5 trading days
+
+    new_filings, buy_counts, sell_counts = set(), {}, {}
+    for t in trades_data.get("trades", []):
+        if _date_key(t["filed"]) < week_ago:
+            continue
+        new_filings.add((t["member"], t["filed"]))
+        if t["side"] == "BUY":
+            buy_counts[t["ticker"]] = buy_counts.get(t["ticker"], 0) + 1
+        elif t["side"] == "SELL":
+            sell_counts[t["ticker"]] = sell_counts.get(t["ticker"], 0) + 1
+    top_buy = max(buy_counts.items(), key=lambda kv: kv[1]) if buy_counts else None
+    top_sell = max(sell_counts.items(), key=lambda kv: kv[1]) if sell_counts else None
+
+    week_bills = [b for b in bills_data.get("bills", [])
+                  if (b.get("status_date") or "") >= week_ago]
+    tagged_bills = [b for b in week_bills if b["sectors"]][:3]
+
+    sector_news = {}
+    for n in news_data.get("items", []):
+        for s in n["sectors"]:
+            sector_news[s["sector"]] = sector_news.get(s["sector"], 0) + 1
+    top_sector = max(sector_news.items(), key=lambda kv: kv[1]) if sector_news else None
+
+    return {
+        "updated": int(time.time()),
+        "spx_close": spx_close, "spx_week": spx_week,
+        "new_filings": len(new_filings),
+        "top_buy": {"ticker": top_buy[0], "count": top_buy[1]} if top_buy else None,
+        "top_sell": {"ticker": top_sell[0], "count": top_sell[1]} if top_sell else None,
+        "bills_moved": len(week_bills),
+        "highlight_bills": [{"number": b["number"], "title": b["title"][:120],
+                             "status": b["status"], "link": b["link"],
+                             "sectors": b["sectors"]} for b in tagged_bills],
+        "top_news_sector": {"sector": top_sector[0], "count": top_sector[1]} if top_sector else None,
+    }
+
+
 # --------------------------------------------------------------- history ----
 
 SYMBOL_RE = re.compile(r"^[A-Za-z0-9^.\-=]{1,12}$")
@@ -387,6 +550,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(mem_cached("bills", 1800, build_bills))
             elif path == "/api/news":
                 self.send_json(mem_cached("news", 900, build_news))
+            elif path == "/api/signals":
+                self.send_json(mem_cached("signals", 1800, build_signals))
+            elif path == "/api/brief":
+                self.send_json(mem_cached("brief", 1800, build_brief))
             elif path == "/api/history":
                 symbol = (qs.get("symbol") or ["^GSPC"])[0]
                 rng = (qs.get("range") or ["5y"])[0]

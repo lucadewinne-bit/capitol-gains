@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#2a78d6"/>
+  <!-- capitol dome -->
+  <path d="M64 22c-14 0-25 9-25 20h50c0-11-11-20-25-20z" fill="#fff" opacity="0.95"/>
+  <rect x="60" y="14" width="8" height="10" rx="3" fill="#fff" opacity="0.95"/>
+  <rect x="34" y="46" width="60" height="7" rx="3" fill="#fff" opacity="0.95"/>
+  <g fill="#fff" opacity="0.9">
+    <rect x="40" y="57" width="8" height="26" rx="2"/>
+    <rect x="54" y="57" width="8" height="26" rx="2"/>
+    <rect x="68" y="57" width="8" height="26" rx="2"/>
+    <rect x="82" y="57" width="8" height="26" rx="2"/>
+  </g>
+  <!-- rising chart line -->
+  <path d="M30 106 L52 96 L68 101 L98 84" fill="none" stroke="#fff" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M98 84 l-10 -1 m10 1 l-2 10" fill="none" stroke="#fff" stroke-width="7"
+        stroke-linecap="round"/>
+</svg>

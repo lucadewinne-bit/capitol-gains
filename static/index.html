@@ -17,9 +17,11 @@
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="signals">Signals</button>
     <button class="tab" data-tab="trades">Congress Trades</button>
     <button class="tab" data-tab="bills">Legislation</button>
     <button class="tab" data-tab="news">News</button>
+    <button class="tab" data-tab="learn">Learn</button>
     <button class="tab" data-tab="plan">My Monthly Plan</button>
   </nav>
 </header>
@@ -27,13 +29,18 @@
 <div class="disclaimer">
   <strong>Research tool — not financial advice.</strong> Strategies that aim to beat the
   S&amp;P&nbsp;500 carry a real risk of losing money; nothing here removes that risk.
-  Congressional-trade data comes from official STOCK Act filings, which are disclosed
+  Congressional-trade data comes from official
+  <span class="term" data-term="stockact">STOCK Act</span> filings, which are disclosed
   30&ndash;45 days after the trade happened.
 </div>
 
 <main>
   <!-- ============================= OVERVIEW ============================= -->
   <section id="tab-overview" class="tabpanel active">
+    <div class="card brief">
+      <h2>This week in one minute</h2>
+      <div id="brief-body" class="loading">Writing your weekly brief&hellip;</div>
+    </div>
     <div class="tiles" id="ov-tiles"></div>
     <div class="card">
       <div class="card-head">
@@ -57,6 +64,19 @@
         <div id="ov-news" class="loading">Loading news&hellip;</div>
       </div>
     </div>
+  </section>
+
+  <!-- ============================= SIGNALS ============================= -->
+  <section id="tab-signals" class="tabpanel">
+    <div class="card banner">
+      <strong>What a signal is (and isn&rsquo;t):</strong> signal strength measures how much
+      <em>attention</em> a stock is getting in public data — congressional buying, policy
+      activity in its sector, and price <span class="term" data-term="momentum">momentum</span>.
+      It is <strong>not a prediction and not a recommendation</strong>. High attention can mean
+      opportunity or hype; the score can&rsquo;t tell the difference. Read the &ldquo;why&rdquo;
+      and &ldquo;what could go wrong&rdquo; on every card before forming your own view.
+    </div>
+    <div id="signals-list" class="loading">Scoring tickers from the latest data (first load can take a minute)&hellip;</div>
   </section>
 
   <!-- ============================= TRADES ============================= -->
@@ -112,6 +132,80 @@
     </div>
   </section>
 
+  <!-- ============================= LEARN ============================= -->
+  <section id="tab-learn" class="tabpanel">
+    <div class="card">
+      <h2>Investing, in plain English</h2>
+      <p class="note">Everything below is education, not advice. Hover or tap any
+        <span class="term" data-term="ticker">underlined term</span> anywhere in the app for a quick definition.</p>
+
+      <div class="learn">
+        <h3>What is a stock?</h3>
+        <p>A stock (or &ldquo;share&rdquo;) is a tiny slice of ownership in a company. If you own one share
+          of Apple, you own a very small piece of Apple. Its price moves all day as people trade it —
+          up when more people want to buy, down when more want to sell. You make money if you sell for
+          more than you paid (or through <span class="term" data-term="dividend">dividends</span>);
+          you lose money if the price drops and you sell for less.</p>
+
+        <h3>What is the S&amp;P 500?</h3>
+        <p>The S&amp;P 500 is a list of ~500 of the biggest U.S. companies (Apple, Microsoft, etc.),
+          combined into one number. When people say &ldquo;the market was up today,&rdquo; they usually
+          mean this. You can&rsquo;t buy the S&amp;P 500 itself, but funds like SPY or VOO copy it
+          almost exactly. Historically it has averaged roughly 7&ndash;10% a year <em>over decades</em> —
+          including some brutal years of -20% or worse along the way. That average is the yardstick
+          this app measures everything against.</p>
+
+        <h3>What is an ETF / index fund?</h3>
+        <p>An <span class="term" data-term="etf">ETF</span> is a basket of many stocks that trades like a
+          single stock. Buying one share of XLV, for example, spreads your money across dozens of
+          healthcare companies at once. That&rsquo;s why the sector tags in this app list ETFs as
+          research starting points: they let you act on a <em>sector</em> idea (&ldquo;defense spending is
+          rising&rdquo;) without betting everything on one company being the winner.</p>
+
+        <h3>Risk and return — the honest version</h3>
+        <p>There is no such thing as &ldquo;beats the market, but can&rsquo;t lose money.&rdquo; Higher
+          expected return is <em>payment for accepting</em> a bigger chance of losses. A single stock can
+          drop 50% and stay there for years — or go to zero. The S&amp;P 500 spreads that risk across 500
+          companies, which is why it&rsquo;s so hard to beat: most professional fund managers fail to beat
+          it over 10+ years. Any strategy in this app should be judged against simply buying the index,
+          which is exactly what the My Monthly Plan tab measures.</p>
+
+        <h3>Diversification</h3>
+        <p><span class="term" data-term="diversification">Diversification</span> means not putting all your
+          money in one stock or one sector. A common beginner-friendly structure people use: most of the
+          monthly money into a broad index fund, and only a slice (for example 10&ndash;20%) into
+          individual ideas from research like this. That way one bad pick can&rsquo;t sink you. How you
+          split is your call — the point is that the split, not the picks, does most of the protecting.</p>
+
+        <h3>Dollar-cost averaging (what your monthly plan does)</h3>
+        <p>Investing the same amount every month, no matter what the market is doing, is called
+          <span class="term" data-term="dca">dollar-cost averaging</span>. It automatically buys more
+          shares when prices are low and fewer when they&rsquo;re high, and it protects you from the
+          classic mistake of investing a lump sum right before a crash. Your monthly plan is already
+          this strategy — the only question is what each month&rsquo;s money buys.</p>
+
+        <h3>Why congressional trades are public (the STOCK Act)</h3>
+        <p>Since 2012, the <span class="term" data-term="stockact">STOCK Act</span> requires members of
+          Congress to publicly disclose their stock trades within 45 days, because they often know about
+          upcoming laws, contracts, and investigations before markets do. This app reads those official
+          filings directly. Two honest caveats: the disclosure lag means you&rsquo;re seeing trades up to
+          45 days late, and amounts are reported in ranges (like &ldquo;$15,001&ndash;$50,000&rdquo;), so
+          totals here are estimates. Members also trade for boring reasons — retirement rebalancing,
+          a spouse&rsquo;s job — not only because they know something.</p>
+
+        <h3>How to read this app</h3>
+        <p><strong>Signals</strong> ranks tickers by attention in the data and shows its math openly:
+          up to 40 points for congressional buying, 30 for policy activity in the sector, 30 for price
+          <span class="term" data-term="momentum">momentum</span> vs the S&amp;P 500.
+          <strong>Congress Trades</strong> is the raw official data behind it.
+          <strong>Legislation</strong> and <strong>News</strong> tell you <em>why</em> a sector is moving.
+          <strong>My Monthly Plan</strong> is the scoreboard: it compares your actual choices against
+          &ldquo;what if I&rsquo;d just bought the index&rdquo; — if that comparison stays negative for a
+          long time, the data is telling you something important.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================= PLAN ============================= -->
   <section id="tab-plan" class="tabpanel">
     <div class="card">
@@ -139,13 +233,21 @@
       <div id="plan-chart" class="chart"><p class="loading">Add a contribution to see your comparison.</p></div>
     </div>
     <div class="card">
-      <h2>Contributions</h2>
+      <div class="card-head">
+        <h2>Contributions</h2>
+        <div class="filters">
+          <button type="button" class="ghost" id="plan-export">Export</button>
+          <button type="button" class="ghost" id="plan-import">Import</button>
+          <input type="file" id="plan-import-file" accept=".json,application/json" class="hidden">
+        </div>
+      </div>
       <div class="tablewrap"><table id="plan-table">
         <thead><tr><th>Date</th><th>Amount</th><th>Symbol</th><th>Value today</th><th>If S&amp;P 500</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
       <p class="note">Method: each contribution buys shares at that day&rsquo;s closing price
-        (nearest trading day). The benchmark buys the S&amp;P&nbsp;500 index with the same dollars on the
+        (nearest trading day). The <span class="term" data-term="benchmark">benchmark</span> buys the
+        S&amp;P&nbsp;500 index with the same dollars on the
         same day. Dividends, fees and taxes are not modeled. Past performance does not predict
         future results.</p>
     </div>

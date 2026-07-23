@@ -148,20 +148,54 @@ function shortDate(iso) {
   return mon + " " + y.slice(2);
 }
 
+// ------------------------------------------------------- jargon tooltips --
+const TERMS = {
+  ticker: "A stock's short symbol on the exchange — NVDA is Nvidia, AAPL is Apple.",
+  etf: "Exchange-Traded Fund: one share that holds a whole basket of stocks, so your money is spread across many companies at once.",
+  dividend: "A cash payment some companies send shareholders (usually quarterly) just for holding the stock.",
+  diversification: "Spreading money across many stocks/sectors so one bad pick can't sink you.",
+  dca: "Dollar-cost averaging: investing the same amount on a schedule regardless of price — buys more shares when cheap, fewer when expensive.",
+  momentum: "How a price has been trending recently. Here: the stock's 3-month move compared to the S&P 500's.",
+  stockact: "2012 law requiring members of Congress to publicly disclose their stock trades within 45 days.",
+  ptr: "Periodic Transaction Report — the official form a member of Congress files to disclose a trade.",
+  benchmark: "The yardstick you compare results against — here, putting the same money into the S&P 500 instead.",
+};
+function showTermTip(el) {
+  const def = TERMS[el.dataset.term];
+  if (!def) return;
+  const tip = $("#tooltip");
+  tip.innerHTML = `<div>${esc(def)}</div>`;
+  tip.classList.remove("hidden");
+  const r = el.getBoundingClientRect();
+  let left = r.left;
+  if (left + tip.offsetWidth > window.innerWidth - 8) left = window.innerWidth - tip.offsetWidth - 8;
+  tip.style.left = left + "px";
+  tip.style.top = (r.bottom + 6) + "px";
+}
+document.addEventListener("mouseover", e => {
+  const t = e.target.closest && e.target.closest(".term");
+  if (t) showTermTip(t);
+});
+document.addEventListener("mouseout", e => {
+  if (e.target.closest && e.target.closest(".term")) $("#tooltip").classList.add("hidden");
+});
+
 // ----------------------------------------------------------------- tabs --
 const loaded = {};
+function activateTab(name) {
+  $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  $$(".tabpanel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
+  loadTab(name);
+}
 $("#tabs").addEventListener("click", e => {
   const btn = e.target.closest(".tab");
-  if (!btn) return;
-  $$(".tab").forEach(t => t.classList.toggle("active", t === btn));
-  $$(".tabpanel").forEach(p => p.classList.toggle("active", p.id === "tab-" + btn.dataset.tab));
-  loadTab(btn.dataset.tab);
+  if (btn) activateTab(btn.dataset.tab);
 });
 function loadTab(name) {
   if (loaded[name]) return;
   loaded[name] = true;
-  ({ overview: loadOverview, trades: loadTrades, bills: loadBills,
-     news: loadNews, plan: loadPlan }[name] || (() => {}))();
+  ({ overview: loadOverview, signals: loadSignals, trades: loadTrades,
+     bills: loadBills, news: loadNews, plan: loadPlan }[name] || (() => {}))();
 }
 
 // -------------------------------------------------------------- overview --
@@ -199,8 +233,42 @@ $("#spx-ranges").addEventListener("click", e => {
   drawSpx();
 });
 
+function renderBrief(b) {
+  const lines = [];
+  if (b.spx_close != null) {
+    const dir = b.spx_week >= 0 ? "up" : "down";
+    lines.push(`The <b>S&P 500</b> closed at <b>${Math.round(b.spx_close).toLocaleString()}</b>, ` +
+      `<b class="${b.spx_week >= 0 ? "up-txt" : "down-txt"}">${dir} ${(Math.abs(b.spx_week) * 100).toFixed(1)}%</b> over the past trading week.`);
+  }
+  if (b.new_filings) {
+    let s = `Congress filed <b>${b.new_filings}</b> new trade disclosure${b.new_filings > 1 ? "s" : ""} this week`;
+    if (b.top_buy) s += ` — most bought: <b>${esc(b.top_buy.ticker)}</b> (${b.top_buy.count}×)`;
+    if (b.top_sell) s += `, most sold: <b>${esc(b.top_sell.ticker)}</b> (${b.top_sell.count}×)`;
+    lines.push(s + ".");
+  } else {
+    lines.push("No new congressional trade filings in the parsed set this week.");
+  }
+  if (b.bills_moved) {
+    let s = `<b>${b.bills_moved}</b> bill${b.bills_moved > 1 ? "s" : ""} changed status this week`;
+    if (b.highlight_bills.length) {
+      s += ", including " + b.highlight_bills.map(hb =>
+        `<a href="${esc(hb.link)}" target="_blank" rel="noopener">${esc(hb.number)}</a>` +
+        ` (${hb.sectors.map(x => esc(x.sector)).join(", ")})`).join("; ");
+    }
+    lines.push(s + ".");
+  }
+  if (b.top_news_sector) {
+    lines.push(`Most active sector in political news right now: <b>${esc(b.top_news_sector.sector)}</b> ` +
+      `(${b.top_news_sector.count} stories).`);
+  }
+  $("#brief-body").innerHTML = lines.map(l => `<p class="brief-line">${l}</p>`).join("") +
+    `<p class="note">Auto-written from this week&rsquo;s data — see the Signals tab for what it adds up to.</p>`;
+}
+
 async function loadOverview() {
   drawSpx();
+  getJSON("/api/brief").then(renderBrief)
+    .catch(e => { $("#brief-body").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   getJSON("/api/news").then(n => {
     $("#ov-news").innerHTML = n.items.slice(0, 6).map(newsItemHTML).join("") || "No headlines.";
   }).catch(e => { $("#ov-news").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
@@ -221,6 +289,87 @@ function hbarsHTML(rows) {
     `<span class="hbar-track"><span class="hbar-fill" style="width:${(r.count / maxC) * 100}%"></span></span>` +
     `<span class="hbar-val">${r.count}× · est ${fmtUSD(r.est_total)}</span></div>`).join("");
 }
+
+// --------------------------------------------------------------- signals --
+const pct1 = v => (v >= 0 ? "+" : "−") + (Math.abs(v) * 100).toFixed(1) + "%";
+
+function signalWhy(s, spx3m) {
+  const why = [];
+  if (s.buyers) {
+    let line = `<b>${s.buyers}</b> member${s.buyers > 1 ? "s" : ""} of Congress recently bought ` +
+      `an estimated <b>${fmtUSD(s.buy_total)}</b>`;
+    if (s.sellers) line += ` — but ${s.sellers} sold (est ${fmtUSD(s.sell_total)})`;
+    why.push(line + ".");
+  }
+  if (s.sector) {
+    why.push(`Its sector, <b>${esc(s.sector)}</b>, showed up in <b>${s.bills_hits}</b> recent bill${s.bills_hits === 1 ? "" : "s"} ` +
+      `and <b>${s.news_hits}</b> news stor${s.news_hits === 1 ? "y" : "ies"} we track.`);
+  } else {
+    why.push(`Sector not in our tracking map — no policy points for this one.`);
+  }
+  if (s.r3m != null && spx3m != null) {
+    why.push(`Price is <b>${pct1(s.r3m)}</b> over 3 months, vs <b>${pct1(spx3m)}</b> for the S&P 500.`);
+  }
+  return why;
+}
+function signalRisks(s) {
+  const risks = ["Congress trades are disclosed up to 45 days late — the price may already reflect this news."];
+  if (s.buyers === 1) risks.push("The whole congressional signal here rests on a single member's filing.");
+  if (s.sellers >= s.buyers && s.sellers > 0) risks.push("As many members sold as bought — the signal is mixed.");
+  if (s.parts.momentum >= 25) risks.push("A big recent run-up can also mean you're arriving late.");
+  if (s.parts.momentum <= 5) risks.push("The price has been falling hard vs the market — attention isn't the same as recovery.");
+  if (!s.sector) risks.push("Without sector tracking, no policy tailwind is confirmed.");
+  return risks;
+}
+function partBar(label, val, max) {
+  return `<div class="part"><span class="part-label">${label}</span>` +
+    `<span class="part-track"><span class="part-fill" style="width:${(val / max) * 100}%"></span></span>` +
+    `<span class="part-val">${val}/${max}</span></div>`;
+}
+async function loadSignals() {
+  const el = $("#signals-list");
+  try {
+    const d = await getJSON("/api/signals");
+    if (!d.signals.length) { el.innerHTML = '<p class="loading">No signals yet — no parsed congressional buys.</p>'; return; }
+    el.innerHTML = d.signals.map((s, i) => {
+      const why = signalWhy(s, d.spx_r3m).map(w => `<li>${w}</li>`).join("");
+      const risks = signalRisks(s).map(r => `<li>${esc(r)}</li>`).join("");
+      return `<div class="card signal-card">
+        <div class="signal-head">
+          <div class="signal-rank">#${i + 1}</div>
+          <div class="signal-id">
+            <div><span class="ticker big">${esc(s.ticker)}</span> <span class="sub">${esc(s.name)}</span></div>
+            <div class="meta">${s.sector ? esc(s.sector) + " · sector ETFs to research: " + esc(s.sector_etfs) : "sector untracked"}</div>
+          </div>
+          <div class="score-badge" title="Signal strength out of 100">${s.score}</div>
+        </div>
+        <div class="parts">
+          ${partBar("Congress buying", s.parts.congress, 40)}
+          ${partBar("Policy activity", s.parts.policy, 30)}
+          ${partBar("Momentum vs S&P", s.parts.momentum, 30)}
+        </div>
+        <div class="whywrap"><h4>Why it's getting attention</h4><ul class="why">${why}</ul></div>
+        <div class="whywrap"><h4>What could go wrong</h4><ul class="why risks">${risks}</ul></div>
+        <div class="signal-foot">
+          <button class="ghost" data-goto-trades="${esc(s.ticker)}">See the actual trades &rarr;</button>
+        </div>
+      </div>`;
+    }).join("") +
+    `<p class="note">Scoring, openly: up to 40 pts for congressional buying (10 per distinct buyer, +5 if
+     estimated total &ge; $50k, &minus;8 per seller), up to 30 pts for bills + news activity in the sector
+     (3 per item), and up to 30 pts for 3-month price <span class="term" data-term="momentum">momentum</span>
+     (15 = moving with the market, &plusmn;1 per percentage point vs the S&P 500).</p>`;
+  } catch (e) {
+    el.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  }
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-goto-trades]");
+  if (!b) return;
+  activateTab("trades");
+  $("#trade-search").value = b.dataset.gotoTrades;
+  if (allTrades.length) renderTradesTable();
+});
 
 // ---------------------------------------------------------------- trades --
 let allTrades = [];
@@ -430,6 +579,43 @@ $("#plan-table").addEventListener("click", e => {
   renderPlan();
 });
 function loadPlan() { renderPlan(); }
+
+// export / import (moves plan data between computers)
+$("#plan-export").addEventListener("click", () => {
+  const payload = { app: "capitol-gains", version: 1, exported: new Date().toISOString(), entries: loadEntries() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "capitol-gains-plan.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+$("#plan-import").addEventListener("click", () => $("#plan-import-file").click());
+$("#plan-import-file").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const incoming = Array.isArray(data) ? data : data.entries;
+    if (!Array.isArray(incoming)) throw new Error("no contributions found in that file");
+    const entries = loadEntries();
+    const seen = new Set(entries.map(x => String(x.id)));
+    let added = 0;
+    incoming.forEach(x => {
+      if (!x || !x.date || !(+x.amount > 0) || !x.symbol || seen.has(String(x.id))) return;
+      entries.push({ id: x.id || Date.now() + added, date: String(x.date),
+                     amount: +x.amount, symbol: String(x.symbol).toUpperCase().replace(/[^A-Z0-9^.\-]/g, "") || "^GSPC" });
+      added++;
+    });
+    entries.sort((a, b) => a.date.localeCompare(b.date));
+    saveEntries(entries);
+    renderPlan();
+    alert(added + " contribution(s) imported.");
+  } catch (err) {
+    alert("Could not import: " + err.message);
+  }
+});
 
 // ------------------------------------------------------------------ init --
 loadTab("overview");
