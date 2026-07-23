@@ -467,6 +467,53 @@ function partBar(label, val, max) {
     `<span class="part-track"><span class="part-fill" style="width:${(val / max) * 100}%"></span></span>` +
     `<span class="part-val">${val}/${max}</span></div>`;
 }
+// A colored verdict banner — blunt, but always tied to "the signal", never "you".
+function verdictHTML(v) {
+  const icon = { consider: "✅", mixed: "⚖️", caution: "⚠️" }[v.level] || "•";
+  return `<div class="verdict ${esc(v.level)}">
+    <div class="verdict-headline">${icon} ${esc(v.headline)}</div>
+    <div class="verdict-tagline">${esc(v.tagline)}</div>
+    <div class="verdict-fine">Automated read of public attention data — <b>not financial advice</b>.
+      Stocks can fall; disclosed trades are up to 45 days old.</div>
+  </div>`;
+}
+
+// "Connect the dots": what happened -> why this stock -> your call.
+function storyHTML(s, spx3m) {
+  const st = s.story || {};
+  const linkList = (items, kind) => items.map(x =>
+    `<li><a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(kind === "bill"
+      ? (x.number ? x.number + " — " : "") + x.title : x.title)}</a>` +
+    `${kind === "news" && x.source ? ` <span class="sub">${esc(x.source)}</span>` : ""}</li>`).join("");
+  const events = (st.bills && st.bills.length ? `<ul class="story-links">${linkList(st.bills, "bill")}</ul>` : "") +
+    (st.news && st.news.length ? `<ul class="story-links">${linkList(st.news, "news")}</ul>` : "");
+  const why = signalWhy(s, spx3m).map(w => `<li>${w}</li>`).join("");
+  const risks = signalRisks(s).map(r => `<li>${esc(r)}</li>`).join("");
+  return `<div class="story">
+    <div class="story-step">
+      <div class="story-num">1</div>
+      <div class="story-body"><h4>What's happening in politics</h4>
+        <p>${esc(st.what || "")}</p>${events}</div>
+    </div>
+    <div class="story-step">
+      <div class="story-num">2</div>
+      <div class="story-body"><h4>Why that touches this stock</h4>
+        <p>${esc(st.why_this || "")}</p>
+        <p class="story-caveat">This is a <em>possible</em> connection based on the company's industry — not proven cause and effect.</p></div>
+    </div>
+    <div class="story-step">
+      <div class="story-num">3</div>
+      <div class="story-body"><h4>Your call — both sides</h4>
+        <div class="twocol case">
+          <div><h5 class="case-for">Case for</h5><ul class="why">${why}</ul></div>
+          <div><h5 class="case-against">Case against</h5><ul class="why risks">${risks}</ul></div>
+        </div>
+        <p class="betting"><b>You'd be betting that:</b> ${esc(st.betting_on || "")}</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function loadSignals() {
   const el = $("#signals-list");
   try {
@@ -474,8 +521,6 @@ async function loadSignals() {
     if (!d.signals.length) { el.innerHTML = '<p class="loading">No signals yet — no parsed congressional buys.</p>'; return; }
     el.innerHTML = d.signals.map((s, i) => {
       s.window_days = d.window_days;
-      const why = signalWhy(s, d.spx_r3m).map(w => `<li>${w}</li>`).join("");
-      const risks = signalRisks(s).map(r => `<li>${esc(r)}</li>`).join("");
       return `<div class="card signal-card">
         <div class="signal-head">
           <div class="signal-rank">#${i + 1}</div>
@@ -483,27 +528,32 @@ async function loadSignals() {
             <div><span class="ticker big">${esc(s.ticker)}</span> <span class="sub">${esc(s.name)}</span></div>
             <div class="meta">${s.sector ? esc(s.sector) + " · sector ETFs to research: " + esc(s.sector_etfs) : "sector untracked"}</div>
           </div>
-          <div class="score-badge" title="Signal strength out of 100">${s.score}</div>
+          <div class="score-badge" title="Attention score out of 100">${s.score}<span class="score-of">/100</span></div>
         </div>
-        <div class="parts">
-          ${partBar("Congress buying", s.parts.congress, 40)}
-          ${partBar("Policy activity", s.parts.policy, 30)}
-          ${partBar("Momentum vs S&P", s.parts.momentum, 30)}
-        </div>
-        <div class="whywrap"><h4>Why it's getting attention</h4><ul class="why">${why}</ul></div>
-        <div class="whywrap"><h4>What could go wrong</h4><ul class="why risks">${risks}</ul></div>
+        ${verdictHTML(s.verdict || { level: "mixed", headline: "Mixed", tagline: "" })}
+        ${storyHTML(s, d.spx_r3m)}
+        <details class="score-details">
+          <summary>How this ${s.score}/100 attention score is built</summary>
+          <div class="parts">
+            ${partBar("Congress buying", s.parts.congress, 40)}
+            ${partBar("Policy activity", s.parts.policy, 30)}
+            ${partBar("Momentum vs S&P", s.parts.momentum, 30)}
+          </div>
+          <p class="note">Up to 40 pts for congressional buying (10 per distinct buyer, +5 if estimated total
+            &ge; $50k, &minus;8 per seller), 30 for bills + news activity in the sector (3 per item), and 30 for
+            3-month price <span class="term" data-term="momentum">momentum</span> (15 = moving with the market,
+            &plusmn;1 per percentage point vs the S&P 500).</p>
+        </details>
         <div class="signal-foot">
           <button class="ghost" data-goto-trades="${esc(s.ticker)}">See the actual trades &rarr;</button>
         </div>
       </div>`;
     }).join("") +
-    `<p class="note">Computed from the <b>full database</b> of House + Senate filings for 2025&ndash;2026, but the
-     congressional component counts only buying in the trailing <b>${d.window_days}</b> days (since ${esc(d.since)}),
-     so a signal reflects <em>current</em> attention. Scoring, openly: up to 40 pts for congressional buying
-     (10 per distinct buyer, +5 if estimated total &ge; $50k, &minus;8 per seller), up to 30 pts for bills + news
-     activity in the sector (3 per item), and up to 30 pts for 3-month price
-     <span class="term" data-term="momentum">momentum</span> (15 = moving with the market, &plusmn;1 per
-     percentage point vs the S&P 500).</p>`;
+    `<p class="note">Every signal is computed from the <b>full database</b> of House + Senate filings for
+     2025&ndash;2026, with the congressional part counting only buying in the trailing <b>${d.window_days}</b> days
+     (since ${esc(d.since)}), so it reflects <em>current</em> attention. The verdict is a plain-language read of that
+     signal&rsquo;s direction — it is <b>not</b> personalized financial advice, and no one can tell you what a stock
+     will do next.</p>`;
   } catch (e) {
     el.innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }

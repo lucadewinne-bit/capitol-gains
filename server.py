@@ -913,6 +913,68 @@ def _window_key(days):
     return time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
 
 
+# Plain-English "why policy touches this kind of company" — used to build the
+# cause -> effect story on each signal card. Deliberately jargon-free.
+SECTOR_PLAIN = {
+    "Defense & Aerospace": "makes military hardware, so when defense spending rises its sales can rise too",
+    "Energy & Oil": "produces or moves energy, so oil, gas and climate policy can swing its costs and demand",
+    "Tech & Semiconductors": "builds tech and computer chips, so trade rules, AI and export policy can help or hurt it",
+    "Healthcare & Pharma": "sells drugs or health services, so Medicare, the FDA and drug-pricing rules hit it directly",
+    "Financials & Crypto": "is a bank, finance or crypto name, so interest-rate, tax and regulation news moves it",
+    "Industrials & Infrastructure": "builds or ships physical things, so infrastructure and manufacturing spending matters to it",
+}
+SECTOR_BET = {
+    "Defense & Aerospace": "defense budgets keep growing",
+    "Energy & Oil": "energy policy keeps favoring this part of the market",
+    "Tech & Semiconductors": "tech and chip policy stays a tailwind",
+    "Healthcare & Pharma": "health policy works out in this company's favor",
+    "Financials & Crypto": "the rate and regulation backdrop stays friendly",
+    "Industrials & Infrastructure": "infrastructure and factory spending keeps flowing",
+}
+
+
+def _verdict(buyers, sellers, policy, momentum):
+    """A blunt, plain-language read of the signal's DIRECTION (not advice)."""
+    if (sellers > buyers and sellers > 0) or momentum <= 6:
+        return {"level": "caution", "headline": "Be cautious",
+                "tagline": "The political-attention signal here is negative or mixed right now."}
+    if buyers >= 2 and sellers < buyers and momentum >= 11:
+        return {"level": "consider", "headline": "Consider buying",
+                "tagline": "The signal is strong and mostly one-directional — worth a closer look."}
+    return {"level": "mixed", "headline": "Mixed — no clear edge",
+            "tagline": "The data points both ways; nothing decisive here."}
+
+
+def _signal_story(name, sector, buyers, buy_total, sector_items):
+    """The cause -> effect narrative + what you'd be betting on."""
+    bills = (sector_items.get(sector, {}) or {}).get("bills", [])[:2] if sector else []
+    news = (sector_items.get(sector, {}) or {}).get("news", [])[:2] if sector else []
+    if sector and (bills or news):
+        if bills and news:
+            what = "A bill moving in Congress and recent political news are both touching the {} industry.".format(sector)
+        elif bills:
+            what = "A bill moving in Congress touches the {} industry.".format(sector)
+        else:
+            what = "Recent political news is touching the {} industry.".format(sector)
+        why_this = "{} {} — and {} member{} of Congress bought it in the last 90 days.".format(
+            name, SECTOR_PLAIN.get(sector, "operates in this sector"),
+            buyers, "" if buyers == 1 else "s")
+        betting = "You'd be betting that {} and that these members were early, not late.".format(
+            SECTOR_BET.get(sector, "this policy trend continues"))
+    elif sector:
+        what = "No specific bill or headline we track is driving the {} sector right now.".format(sector)
+        why_this = "{} {}, but the push here is congressional buying and price trend, not a clear news event.".format(
+            name, SECTOR_PLAIN.get(sector, "operates in this sector"))
+        betting = "You'd be betting that this buying is early insight rather than routine portfolio moves."
+    else:
+        what = "This stock isn't in an industry we map to policy, so there's no political story to point to."
+        why_this = "The whole signal rests on {} member{} of Congress buying it and how the price has moved.".format(
+            buyers, "" if buyers == 1 else "s")
+        betting = "You'd be betting that this congressional buying is early insight rather than routine trades."
+    return {"what": what, "why_this": why_this, "betting_on": betting,
+            "bills": bills, "news": news}
+
+
 def build_signals():
     bills_data = mem_cached("bills", 1800, build_bills)
     news_data = mem_cached("news", 900, build_news)
@@ -943,14 +1005,22 @@ def build_signals():
         if r["traded_key"] > a["last_trade"]:
             a["last_trade"] = r["traded_key"]
 
-    # policy activity per sector from bills + news sector tags
+    # policy activity per sector from bills + news sector tags — keep both the
+    # counts (for scoring) and the actual items (for the plain-English story).
     sector_hits = {s: {"bills": 0, "news": 0} for s in SECTORS}
+    sector_items = {s: {"bills": [], "news": []} for s in SECTORS}
     for b in bills_data.get("bills", []):
         for s in b["sectors"]:
             sector_hits[s["sector"]]["bills"] += 1
+            if len(sector_items[s["sector"]]["bills"]) < 3:
+                sector_items[s["sector"]]["bills"].append({
+                    "number": b["number"], "title": b["title"][:120], "link": b["link"]})
     for n in news_data.get("items", []):
         for s in n["sectors"]:
             sector_hits[s["sector"]]["news"] += 1
+            if len(sector_items[s["sector"]]["news"]) < 3:
+                sector_items[s["sector"]]["news"].append({
+                    "title": n["title"][:120], "link": n["link"], "source": n["source"]})
 
     candidates = sorted(
         [a for a in agg.values() if a["buyers"]],
@@ -976,6 +1046,7 @@ def build_signals():
         else:
             momentum = 15
         etfs = SECTORS.get(sector, {}).get("etfs", "") if sector else ""
+        display_name = hist.get("name", a["ticker"]) if "error" not in hist else a["ticker"]
         signals.append({
             "ticker": a["ticker"], "asset": a["asset"], "sector": sector,
             "sector_etfs": etfs,
@@ -988,7 +1059,9 @@ def build_signals():
             "last_trade": a["last_trade"],
             "bills_hits": hits["bills"], "news_hits": hits["news"],
             "r1m": r1m, "r3m": r3m,
-            "name": hist.get("name", a["ticker"]) if "error" not in hist else a["ticker"],
+            "name": display_name,
+            "verdict": _verdict(buyers, sellers, policy, momentum),
+            "story": _signal_story(display_name, sector, buyers, a["buy_total"], sector_items),
         })
     signals.sort(key=lambda s: s["score"], reverse=True)
     return {"updated": int(time.time()), "spx_r1m": spx_r1m, "spx_r3m": spx_r3m,
