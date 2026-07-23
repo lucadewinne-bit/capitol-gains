@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capitol Gains</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#2a78d6">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Capitol Gains</h1>
+    <p class="tagline">Political-trends investment research &middot; official disclosures, legislation &amp; news</p>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="trades">Congress Trades</button>
+    <button class="tab" data-tab="bills">Legislation</button>
+    <button class="tab" data-tab="news">News</button>
+    <button class="tab" data-tab="plan">My Monthly Plan</button>
+  </nav>
+</header>
+
+<div class="disclaimer">
+  <strong>Research tool — not financial advice.</strong> Strategies that aim to beat the
+  S&amp;P&nbsp;500 carry a real risk of losing money; nothing here removes that risk.
+  Congressional-trade data comes from official STOCK Act filings, which are disclosed
+  30&ndash;45 days after the trade happened.
+</div>
+
+<main>
+  <!-- ============================= OVERVIEW ============================= -->
+  <section id="tab-overview" class="tabpanel active">
+    <div class="tiles" id="ov-tiles"></div>
+    <div class="card">
+      <div class="card-head">
+        <h2>S&amp;P 500 (^GSPC)</h2>
+        <div class="rangebar" id="spx-ranges">
+          <button data-range="6mo">6M</button>
+          <button data-range="1y" class="active">1Y</button>
+          <button data-range="5y">5Y</button>
+          <button data-range="10y">10Y</button>
+        </div>
+      </div>
+      <div id="spx-chart" class="chart"></div>
+    </div>
+    <div class="twocol">
+      <div class="card">
+        <h2>Most-bought by Congress <span class="sub">(recent filings)</span></h2>
+        <div id="ov-topbuys" class="loading">Loading congressional filings&hellip;</div>
+      </div>
+      <div class="card">
+        <h2>Latest political headlines</h2>
+        <div id="ov-news" class="loading">Loading news&hellip;</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= TRADES ============================= -->
+  <section id="tab-trades" class="tabpanel">
+    <div class="card">
+      <h2>Congressional stock trades <span class="sub">(official House STOCK Act filings)</span></h2>
+      <p class="note" id="trades-meta"></p>
+      <div class="twocol">
+        <div><h3>Top buys</h3><div id="top-buys"></div></div>
+        <div><h3>Top sells</h3><div id="top-sells"></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>All parsed trades</h2>
+        <div class="filters">
+          <input type="text" id="trade-search" placeholder="Filter by ticker or member&hellip;">
+          <select id="trade-side">
+            <option value="">All sides</option>
+            <option value="BUY">Buys</option>
+            <option value="SELL">Sells</option>
+          </select>
+        </div>
+      </div>
+      <div class="tablewrap"><table id="trades-table">
+        <thead><tr><th>Member</th><th>Ticker</th><th>Asset</th><th>Side</th>
+        <th>Trade date</th><th>Amount</th><th>Filing</th></tr></thead>
+        <tbody><tr><td colspan="7" class="loading">Downloading &amp; parsing official filings (first load takes ~30s)&hellip;</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ============================= BILLS ============================= -->
+  <section id="tab-bills" class="tabpanel">
+    <div class="card">
+      <h2>Legislation on the move <span class="sub">(latest status changes, via GovTrack)</span></h2>
+      <p class="note">Sector tags are keyword-based hints about which industries a bill might touch,
+        with broad sector ETFs listed as research starting points — not recommendations.</p>
+      <div id="bills-list" class="loading">Loading bills&hellip;</div>
+    </div>
+  </section>
+
+  <!-- ============================= NEWS ============================= -->
+  <section id="tab-news" class="tabpanel">
+    <div class="card">
+      <div class="card-head">
+        <h2>Political news</h2>
+        <div class="filters">
+          <select id="news-sector"><option value="">All sectors</option></select>
+        </div>
+      </div>
+      <div id="news-list" class="loading">Loading news&hellip;</div>
+    </div>
+  </section>
+
+  <!-- ============================= PLAN ============================= -->
+  <section id="tab-plan" class="tabpanel">
+    <div class="card">
+      <h2>My monthly investing plan</h2>
+      <p class="note">Log what you invest each month. The dashboard prices your holdings and
+        honestly compares them against putting the exact same money, on the same dates, into the
+        S&amp;P&nbsp;500. Data stays in this browser only.</p>
+      <form id="plan-form" class="planform">
+        <label>Date <input type="date" id="pf-date" required></label>
+        <label>Amount ($) <input type="number" id="pf-amount" min="1" step="0.01" required placeholder="500"></label>
+        <label>Invested in
+          <select id="pf-symbol-preset">
+            <option value="^GSPC">S&amp;P 500 index</option>
+            <option value="SPY">SPY (S&amp;P 500 ETF)</option>
+            <option value="custom">Custom ticker&hellip;</option>
+          </select>
+        </label>
+        <label id="pf-custom-wrap" class="hidden">Ticker <input type="text" id="pf-custom" placeholder="e.g. NVDA" maxlength="10"></label>
+        <button type="submit" class="primary">Add contribution</button>
+      </form>
+    </div>
+    <div class="tiles" id="plan-tiles"></div>
+    <div class="card">
+      <h2>Portfolio vs. same money in the S&amp;P 500</h2>
+      <div id="plan-chart" class="chart"><p class="loading">Add a contribution to see your comparison.</p></div>
+    </div>
+    <div class="card">
+      <h2>Contributions</h2>
+      <div class="tablewrap"><table id="plan-table">
+        <thead><tr><th>Date</th><th>Amount</th><th>Symbol</th><th>Value today</th><th>If S&amp;P 500</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="note">Method: each contribution buys shares at that day&rsquo;s closing price
+        (nearest trading day). The benchmark buys the S&amp;P&nbsp;500 index with the same dollars on the
+        same day. Dividends, fees and taxes are not modeled. Past performance does not predict
+        future results.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Sources: House Clerk financial disclosures &middot; GovTrack &middot; Politico &amp; The Hill RSS &middot; Yahoo Finance.
+  This tool surfaces public data for research and is not personalized investment advice.
+</footer>
+
+<div id="tooltip" class="tooltip hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
