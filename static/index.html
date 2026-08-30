@@ -4,10 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capitol Gains</title>
+<script>
+/* set theme before first paint to avoid a flash; dark is the default */
+try {
+  var _t = localStorage.getItem("capitol_theme");
+  document.documentElement.setAttribute("data-theme", _t === "light" ? "light" : "dark");
+} catch (e) { document.documentElement.setAttribute("data-theme", "dark"); }
+</script>
 <link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#2a78d6">
+<meta name="theme-color" content="#0e0e0d">
 </head>
 <body>
 <header class="topbar">
@@ -24,6 +31,7 @@
     <button class="tab" data-tab="learn">Learn</button>
     <button class="tab" data-tab="plan">My Monthly Plan</button>
   </nav>
+  <button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="false">&#9788; Light</button>
 </header>
 
 <div class="disclaimer">
@@ -40,9 +48,28 @@
 <main>
   <!-- ============================= OVERVIEW ============================= -->
   <section id="tab-overview" class="tabpanel active">
+    <section class="hero">
+      <h1 class="hero-title">Follow the money <span class="accent">through Congress</span>.</h1>
+      <p class="hero-sub">Every 2025&ndash;2026 U.S. House &amp; Senate stock disclosure, parsed straight from the
+        official source and turned into transparent, plain-English research signals &mdash; with the risks in view.
+        A research tool, <strong>not</strong> financial advice.</p>
+      <div class="hero-stats" id="hero-stats">
+        <div class="hstat"><span class="hstat-num" id="hs-trades">&mdash;</span><span class="hstat-label">trades parsed</span></div>
+        <div class="hstat"><span class="hstat-num" id="hs-filings">&mdash;</span><span class="hstat-label">filings ingested</span></div>
+        <div class="hstat"><span class="hstat-num" id="hs-members">&mdash;</span><span class="hstat-label">members tracked</span></div>
+      </div>
+    </section>
     <div class="card brief">
       <h2>This week in one minute</h2>
       <div id="brief-body" class="loading">Writing your weekly brief&hellip;</div>
+    </div>
+    <div class="card alerts hidden" id="watch-card">
+      <div class="card-head">
+        <h2>New from members you follow</h2>
+        <span class="sub" id="watch-since"></span>
+      </div>
+      <div class="watch-list" id="watch-list"></div>
+      <div id="watch-feed" class="loading">Loading&hellip;</div>
     </div>
     <div class="card alerts">
       <div class="card-head">
@@ -132,6 +159,33 @@
   <section id="tab-member" class="tabpanel">
     <button class="ghost back-btn" id="member-back">&larr; Back</button>
     <div id="member-body" class="loading">Loading member&hellip;</div>
+  </section>
+
+  <!-- ===================== TICKER SCORECARD (no tab) ===================== -->
+  <section id="tab-ticker" class="tabpanel">
+    <button class="ghost back-btn" id="ticker-back">&larr; Back</button>
+    <div id="ticker-body" class="loading">Loading ticker&hellip;</div>
+  </section>
+
+  <!-- ===================== TICKER vs TICKER (no tab) ===================== -->
+  <section id="tab-compare" class="tabpanel">
+    <button class="ghost back-btn" id="compare-back">&larr; Back</button>
+    <div class="card">
+      <div class="card-head">
+        <h2>Compare two tickers</h2>
+        <button type="button" class="ghost" id="compare-copy">Copy link</button>
+      </div>
+      <p class="note">Side-by-side <em>attention</em> scores &mdash; congressional trading, policy activity and
+        price momentum. A higher score means a ticker is drawing more public and congressional attention right now.
+        It is <strong>not</strong> a verdict on which is the better investment, a prediction, or a recommendation.</p>
+      <form id="compare-form" class="filters">
+        <input type="text" id="cmp-a" placeholder="Ticker A (e.g. NVDA)" maxlength="10">
+        <span>vs</span>
+        <input type="text" id="cmp-b" placeholder="Ticker B (e.g. LMT)" maxlength="10">
+        <button type="submit" class="primary">Compare</button>
+      </form>
+    </div>
+    <div id="compare-body"></div>
   </section>
 
   <!-- ============================= BILLS ============================= -->

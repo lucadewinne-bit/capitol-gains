@@ -26,6 +26,32 @@ async function getJSON(url) {
 
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+// ----------------------------------------------------------------- theme --
+// Dark is the default; the choice is remembered in localStorage. The initial
+// data-theme attribute is set by an inline <head> script to avoid a flash.
+const THEME_KEY = "capitol_theme";
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = $("#theme-toggle");
+  if (btn) {
+    btn.innerHTML = t === "light" ? "☾ Dark" : "☀ Light";
+    btn.setAttribute("aria-pressed", String(t === "light"));
+  }
+}
+(function initThemeToggle() {
+  applyTheme(currentTheme());
+  const btn = $("#theme-toggle");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const next = currentTheme() === "light" ? "dark" : "light";
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyTheme(next);
+  });
+})();
+
 // ------------------------------------------------------------ line chart --
 // series: [{name, colorVar, values:[num|null]}], one shared dates[] axis.
 function lineChart(container, dates, series, opts) {
@@ -186,12 +212,14 @@ document.addEventListener("mouseout", e => {
 // ----------------------------------------------------------------- tabs --
 const loaded = {};
 let prevTab = "overview";
+// Panels with no nav button, opened over the top and dismissed with a Back button.
+const OVERLAY_TABS = new Set(["member", "ticker", "compare"]);
 function activateTab(name) {
-  if (name !== "member") prevTab = name;
+  if (!OVERLAY_TABS.has(name)) prevTab = name;
   $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   $$(".tabpanel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
   window.scrollTo(0, 0);
-  if (name !== "member") loadTab(name);
+  if (!OVERLAY_TABS.has(name)) loadTab(name);
 }
 $("#tabs").addEventListener("click", e => {
   const btn = e.target.closest(".tab");
@@ -240,11 +268,11 @@ function renderMember(m) {
   const maxC = Math.max(1, ...m.top_tickers.map(x => x.count));
   const tickers = m.top_tickers.map(x =>
     `<div class="hbar-row" title="${x.count} trade(s), est buys ${fmtUSD(x.buy_est)}, est sells ${fmtUSD(x.sell_est)}">` +
-    `<a class="hbar-tick tickerlink" href="#" data-goto-trades="${esc(x.ticker)}">${esc(x.ticker)}</a>` +
+    `<a class="hbar-tick tickerlink" href="#" data-ticker="${esc(x.ticker)}">${esc(x.ticker)}</a>` +
     `<span class="hbar-track"><span class="hbar-fill" style="width:${(x.count / maxC) * 100}%"></span></span>` +
     `<span class="hbar-val">${x.count}× · est ${fmtUSD(x.buy_est + x.sell_est)}</span></div>`).join("");
   const trows = m.trades.map(tr =>
-    `<tr><td class="ticker"><a href="#" class="tickerlink" data-goto-trades="${esc(tr.ticker)}">${esc(tr.ticker)}</a></td>` +
+    `<tr><td class="ticker"><a href="#" class="tickerlink" data-ticker="${esc(tr.ticker)}">${esc(tr.ticker)}</a></td>` +
     `<td>${esc(tr.asset)}</td>` +
     `<td class="${tr.side === "BUY" ? "side-buy" : tr.side === "SELL" ? "side-sell" : ""}">${esc(tr.side)}</td>` +
     `<td>${esc(tr.owner || "")}</td>` +
@@ -262,6 +290,8 @@ function renderMember(m) {
       <p class="note">All figures are estimates from official disclosures, which report amounts in ranges and
         lag the actual trade by up to 45 days. Members trade for many reasons (rebalancing, a spouse&rsquo;s job);
         this is public-record research, <strong>not</strong> a claim of wrongdoing or a recommendation.</p>
+      <button type="button" class="star-btn" data-follow-key="${esc(m.key)}" data-follow-name="${esc(m.name)}"
+        aria-pressed="${isWatched(m.key)}">${starLabel(isWatched(m.key))}</button>
     </div>
     <div class="tiles">${tiles.map(x =>
       `<div class="tile"><div class="label">${esc(x.label)}${x.term ? ` <span class="term" data-term="${x.term}">?</span>` : ""}</div>` +
@@ -278,6 +308,182 @@ function renderMember(m) {
         <th>Trade date</th><th>Amount</th><th>Filing</th></tr></thead>
         <tbody>${trows}</tbody></table></div>
     </div>`;
+}
+
+// -------------------------------------------------------- ticker scorecard --
+// One ticker: congressional buy/sell volume + the existing Signals score, in a
+// compact scorecard. Reuses partBar / verdictHTML / signalWhy / signalRisks.
+$("#ticker-back").addEventListener("click", () => activateTab(prevTab));
+document.addEventListener("click", e => {
+  const el = e.target.closest && e.target.closest("[data-ticker]");
+  if (!el) return;
+  e.preventDefault();
+  openTicker(el.dataset.ticker);
+});
+async function openTicker(sym) {
+  sym = String(sym || "").trim().toUpperCase();
+  if (!sym) return;
+  const body = $("#ticker-body");
+  body.innerHTML = '<p class="loading">Loading ticker&hellip;</p>';
+  activateTab("ticker");
+  try {
+    renderTicker(await getJSON("/api/ticker?symbol=" + encodeURIComponent(sym)));
+  } catch (err) {
+    body.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+function bsVolHTML(buy, sell) {
+  const max = Math.max(buy.est_volume, sell.est_volume, 1);
+  const row = (label, cls, d) =>
+    `<div class="bs-row"><span class="bs-k ${cls}">${label}</span>` +
+    `<span class="bs-track"><span class="bs-fill ${cls}" style="width:${(d.est_volume / max) * 100}%"></span></span>` +
+    `<span class="bs-v">${fmtUSD(d.est_volume)} · ${d.trades} trade${d.trades === 1 ? "" : "s"} · ` +
+    `${d.members} member${d.members === 1 ? "" : "s"}</span></div>`;
+  return `<div class="bs-vol">${row("Buys", "buy", buy)}${row("Sells", "sell", sell)}</div>`;
+}
+
+function scoreBreakdownHTML(s) {
+  return `<div class="parts">
+    ${partBar("Congress buying", s.parts.congress, 40)}
+    ${partBar("Policy activity", s.parts.policy, 30)}
+    ${partBar("Momentum vs S&P", s.parts.momentum, 30)}
+  </div>`;
+}
+
+function renderTicker(d) {
+  const s = d.signal;  // null when the ticker isn't a current top-14 signal
+  const scoreBadge = s
+    ? `<span class="score-badge" title="Attention score out of 100">${s.score}<span class="score-of">/100</span></span>`
+    : `<span class="sub">Below the current signal threshold — showing trade data only</span>`;
+  const verdict = s ? verdictHTML(s.verdict || { level: "mixed", headline: "Mixed", tagline: "" }) : "";
+  const cases = s ? `
+    <div class="twocol case" style="margin-top:12px">
+      <div><h5 class="case-for">Case for</h5><ul class="why">${
+        signalWhy(Object.assign({ window_days: d.window_days }, s), d.spx_r3m).map(w => `<li>${w}</li>`).join("")}</ul></div>
+      <div><h5 class="case-against">Case against</h5><ul class="why risks">${
+        signalRisks(s).map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>
+    </div>` : "";
+  const parts = s ? `
+    <details class="score-details" open>
+      <summary>How this ${s.score}/100 attention score is built</summary>
+      ${scoreBreakdownHTML(s)}
+    </details>` : "";
+  const maxN = Math.max(1, ...d.top_members.map(m => m.n));
+  const members = d.top_members.map(m =>
+    `<div class="hbar-row wide"><a class="hbar-tick member-link" href="#" data-member-key="${esc(m.member_key)}">${esc(m.member)}</a>` +
+    `<span class="hbar-track"><span class="hbar-fill" style="width:${(m.n / maxN) * 100}%"></span></span>` +
+    `<span class="hbar-val">${m.n}× · buy ${fmtUSD(m.buy_est)} / sell ${fmtUSD(m.sell_est)}</span></div>`).join("");
+  const recent = d.trades.slice(0, 12).map(tr =>
+    `<tr><td><a href="#" class="member-link" data-member-key="${esc(tr.member_key)}">${esc(tr.member)}</a></td>` +
+    `<td class="${tr.side === "BUY" ? "side-buy" : tr.side === "SELL" ? "side-sell" : ""}">${esc(tr.side)}</td>` +
+    `<td class="num">${esc(tr.traded)}</td>` +
+    `<td class="num">${fmtUSD(tr.amount_low)}–${fmtUSD(tr.amount_high)}</td></tr>`).join("");
+
+  $("#ticker-body").innerHTML = `
+    <div class="card signal-card">
+      <div class="scorecard-head">
+        <span class="ticker big">${esc(d.ticker)}</span>
+        <span class="sub">${esc(d.name || d.asset || "")}</span>
+        ${scoreBadge}
+      </div>
+      <div class="meta sub" style="margin:4px 0 10px">${d.sector ? esc(d.sector) : "sector untracked"} ·
+        ${d.totals.trades} trade${d.totals.trades === 1 ? "" : "s"} on record from
+        ${d.totals.members} member${d.totals.members === 1 ? "" : "s"}
+        (${esc(d.totals.first_trade || "—")} → ${esc(d.totals.last_trade || "—")})</div>
+      ${verdict}
+      <h3>Congressional buy vs sell volume <span class="sub">(estimated, full database)</span></h3>
+      ${bsVolHTML(d.buy, d.sell)}
+      ${parts}
+      ${cases}
+      <div class="twocol" style="margin-top:14px">
+        <div><h3>Most active members</h3>${members || '<p class="loading">None.</p>'}</div>
+        <div><h3>Recent trades <span class="sub">(newest first)</span></h3>
+          <div class="tablewrap"><table>
+            <thead><tr><th>Member</th><th>Side</th><th>Date</th><th>Amount</th></tr></thead>
+            <tbody>${recent}</tbody></table></div></div>
+      </div>
+      <p class="note">This scorecard only re-presents data from <b>Congress Trades</b> and <b>Signals</b> — it is
+        <strong>not</strong> a new rating, a prediction, or a buy/sell recommendation. Disclosures lag the actual
+        trade by up to 45 days, and amounts are disclosed in ranges (midpoints shown).</p>
+      <div class="signal-foot">
+        <button class="ghost" data-goto-trades="${esc(d.ticker)}">See the actual trades &rarr;</button>
+        <button class="ghost" data-compare-a="${esc(d.ticker)}">Compare with another ticker</button>
+      </div>
+    </div>`;
+}
+
+// -------------------------------------------------------- ticker vs ticker --
+// A shareable side-by-side of two tickers' attention scores. Reuses /api/ticker
+// (two calls) plus partBar / verdictHTML — no new backend endpoint.
+$("#compare-back").addEventListener("click", () => activateTab(prevTab));
+$("#compare-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const a = $("#cmp-a").value.trim().toUpperCase();
+  const b = $("#cmp-b").value.trim().toUpperCase();
+  if (a && b) location.hash = "compare=" + encodeURIComponent(a + "," + b);
+});
+$("#compare-copy").addEventListener("click", async () => {
+  const btn = $("#compare-copy");
+  try { await navigator.clipboard.writeText(location.href); btn.textContent = "Copied ✓"; }
+  catch (e) { btn.textContent = "Copy failed"; }
+  setTimeout(() => { btn.textContent = "Copy link"; }, 1500);
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-compare-a]");
+  if (!b) return;
+  e.preventDefault();
+  activateTab("compare");
+  $("#cmp-a").value = b.dataset.compareA;
+  $("#cmp-b").value = "";
+  $("#cmp-b").focus();
+  $("#compare-body").innerHTML = "";
+});
+async function openCompare(a, b) {
+  a = String(a || "").trim().toUpperCase();
+  b = String(b || "").trim().toUpperCase();
+  activateTab("compare");
+  $("#cmp-a").value = a;
+  $("#cmp-b").value = b;
+  const body = $("#compare-body");
+  if (!a || !b) { body.innerHTML = ""; return; }
+  body.innerHTML = '<p class="loading">Scoring both tickers&hellip;</p>';
+  try {
+    const [da, db2] = await Promise.all([
+      getJSON("/api/ticker?symbol=" + encodeURIComponent(a)),
+      getJSON("/api/ticker?symbol=" + encodeURIComponent(b)),
+    ]);
+    renderCompare(da, db2);
+  } catch (err) {
+    body.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+function cmpColHTML(d, win) {
+  const s = d.signal;
+  return `<div class="cmp-col${win ? " win" : ""}">
+    <h3><a href="#" class="tickerlink" data-ticker="${esc(d.ticker)}">${esc(d.ticker)}</a></h3>
+    <div class="cmp-name">${esc(d.name || d.asset || "")}</div>
+    <div class="cmp-score">${s ? s.score : "—"}${s ? '<span class="score-of">/100</span>' : ""}</div>
+    ${s ? verdictHTML(s.verdict || { level: "mixed", headline: "Mixed", tagline: "" })
+        : '<p class="cmp-note">Not a current top-signal ticker — no score, trade data only.</p>'}
+    ${s ? scoreBreakdownHTML(s) : ""}
+    <h4>Buy vs sell volume</h4>
+    ${bsVolHTML(d.buy, d.sell)}
+  </div>`;
+}
+function renderCompare(da, db2) {
+  const sa = da.signal ? da.signal.score : -1;
+  const sb = db2.signal ? db2.signal.score : -1;
+  const tie = sa === sb;
+  $("#compare-body").innerHTML = `
+    <div class="cmp-grid">
+      ${cmpColHTML(da, !tie && sa > sb)}
+      ${cmpColHTML(db2, !tie && sb > sa)}
+    </div>
+    <p class="note">The highlighted side simply has the higher <em>attention</em> score today — more congressional
+      buying, policy activity and momentum showing up in the data. Attention is not quality: a high score can mean a
+      real opportunity or just hype, and disclosed trades are up to 45 days old. Nothing here is financial advice or a
+      recommendation.</p>`;
 }
 
 // -------------------------------------------------------------- overview --
@@ -302,10 +508,9 @@ function renderOverviewTiles(h) {
     { label: "S&P 500 close", value: last.toLocaleString("en-US", { maximumFractionDigits: 0 }) },
     { label: "1-day change", value: fmtPct((last - prev) / prev), delta: last - prev >= 0 ? "up" : "down" },
     { label: spxRange.toUpperCase() + " return", value: fmtPct((last - first) / first), delta: last - first >= 0 ? "up" : "down" },
-    { label: "Filings in database", value: window._ptrCount || "…", id: "tile-ptr" },
   ];
   $("#ov-tiles").innerHTML = tiles.map(t =>
-    `<div class="tile"${t.id ? ` id="${t.id}"` : ""}><div class="label">${esc(t.label)}</div>` +
+    `<div class="tile"><div class="label">${esc(t.label)}</div>` +
     `<div class="value ${t.delta ? "delta " + t.delta : ""}">${esc(t.value)}</div></div>`).join("");
 }
 $("#spx-ranges").addEventListener("click", e => {
@@ -347,25 +552,57 @@ function renderBrief(b) {
     `<p class="note">Auto-written from this week&rsquo;s data — see the Signals tab for what it adds up to.</p>`;
 }
 
+// Hero stat strip — real counts, pulled live (they climb while the DB ingests).
+function renderHeroStats(s) {
+  const n = v => Number(v || 0).toLocaleString();
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("#hs-trades", n(s.db_trades));
+  set("#hs-filings", n((s.house_filings || 0) + (s.senate_filings || 0)));
+  set("#hs-members", n(s.db_members));
+}
+
 async function loadOverview() {
   drawSpx();
+  getJSON("/api/status").then(renderHeroStats).catch(() => {});
   getJSON("/api/brief").then(renderBrief)
     .catch(e => { $("#brief-body").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   getJSON("/api/news").then(n => {
     $("#ov-news").innerHTML = n.items.slice(0, 6).map(newsItemHTML).join("") || "No headlines.";
   }).catch(e => { $("#ov-news").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   getJSON("/api/trades").then(t => {
-    window._ptrCount = (t.house_filings + t.senate_filings).toLocaleString();
-    const tile = $("#tile-ptr .value"); if (tile) tile.textContent = window._ptrCount;
     $("#ov-topbuys").innerHTML = tickerBarsHTML(t.top_buys.slice(0, 6)) ||
       '<p class="loading">No parsed buys yet.</p>';
   }).catch(e => { $("#ov-topbuys").innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   loadAlerts();
+  renderWatchFeed();
 }
 
 // ------------------------------------------------------- alerts / "new" --
 const VISIT_KEY = "capitol_last_visit";
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+// Render one alerts payload (the global feed or a watched-members feed) into `body`.
+function renderAlerts(body, a) {
+  if (!a.new_trades) {
+    body.innerHTML = '<p class="loading">No new trade disclosures in that window. Check back later.</p>';
+    return;
+  }
+  const buys = a.top_buys.length
+    ? `<div class="alert-col"><h4>Most-bought (new)</h4>${tickerBarsHTML(a.top_buys)}</div>` : "";
+  const sells = a.top_sells.length
+    ? `<div class="alert-col"><h4>Most-sold (new)</h4>${tickerBarsHTML(a.top_sells)}</div>` : "";
+  const notable = a.notable.slice(0, 6).map(t =>
+    `<li><a href="#" class="member-link" data-member-key="${esc(t.member_key)}">${esc(t.member)}</a> ` +
+    `<span class="${t.side === "BUY" ? "side-buy" : "side-sell"}">${esc(t.side)}</span> ` +
+    `<a href="#" class="tickerlink" data-ticker="${esc(t.ticker)}">${esc(t.ticker)}</a> ` +
+    `<span class="sub">${fmtUSD(t.amount_low)}–${fmtUSD(t.amount_high)} · ${esc(t.chamber)}</span></li>`).join("");
+  body.innerHTML =
+    `<p class="alert-lead"><b>${a.new_trades.toLocaleString()}</b> new trade${a.new_trades === 1 ? "" : "s"} ` +
+    `across <b>${a.new_filings.toLocaleString()}</b> new filing${a.new_filings === 1 ? "" : "s"}.</p>` +
+    `<div class="alert-cols">${buys}${sells}</div>` +
+    (notable ? `<h4>Biggest new trades</h4><ul class="alert-list">${notable}</ul>` : "");
+}
+
 function loadAlerts() {
   const last = localStorage.getItem(VISIT_KEY);  // null on first visit
   const url = "/api/alerts" + (last ? "?since=" + encodeURIComponent(last) : "");
@@ -374,32 +611,79 @@ function loadAlerts() {
     if (a.error) throw new Error(a.error);
     $("#alerts-since").textContent = last
       ? `since ${a.since}` : `first visit — showing the last 7 days (from ${a.since})`;
-    if (!a.new_trades) {
-      body.innerHTML = '<p class="loading">No new trade disclosures in that window. Check back later.</p>';
-    } else {
-      const buys = a.top_buys.length
-        ? `<div class="alert-col"><h4>Most-bought (new)</h4>${tickerBarsHTML(a.top_buys)}</div>` : "";
-      const sells = a.top_sells.length
-        ? `<div class="alert-col"><h4>Most-sold (new)</h4>${tickerBarsHTML(a.top_sells)}</div>` : "";
-      const notable = a.notable.slice(0, 6).map(t =>
-        `<li><a href="#" class="member-link" data-member-key="${esc(t.member_key)}">${esc(t.member)}</a> ` +
-        `<span class="${t.side === "BUY" ? "side-buy" : "side-sell"}">${esc(t.side)}</span> ` +
-        `<a href="#" class="tickerlink" data-goto-trades="${esc(t.ticker)}">${esc(t.ticker)}</a> ` +
-        `<span class="sub">${fmtUSD(t.amount_low)}–${fmtUSD(t.amount_high)} · ${esc(t.chamber)}</span></li>`).join("");
-      body.innerHTML =
-        `<p class="alert-lead"><b>${a.new_trades.toLocaleString()}</b> new trade${a.new_trades === 1 ? "" : "s"} ` +
-        `across <b>${a.new_filings.toLocaleString()}</b> new filing${a.new_filings === 1 ? "" : "s"}.</p>` +
-        `<div class="alert-cols">${buys}${sells}</div>` +
-        (notable ? `<h4>Biggest new trades</h4><ul class="alert-list">${notable}</ul>` : "");
-    }
+    renderAlerts(body, a);
     localStorage.setItem(VISIT_KEY, todayISO());
   }).catch(e => { body.innerHTML = `<p class="error">${esc(e.message)}</p>`; });
 }
+
+// -------------------------------------------------- follow / watched members --
+// Same local-only storage pattern as My Monthly Plan (PLAN_KEY): a JSON array of
+// { key, name, added }. No accounts.
+const WATCH_KEY = "capitol_watch_v1";
+const loadWatch = () => { try { return JSON.parse(localStorage.getItem(WATCH_KEY)) || []; } catch { return []; } };
+const saveWatch = w => { try { localStorage.setItem(WATCH_KEY, JSON.stringify(w)); } catch (e) {} };
+const isWatched = k => loadWatch().some(w => w.key === k);
+function toggleWatch(key, name) {
+  const w = loadWatch();
+  const i = w.findIndex(x => x.key === key);
+  if (i >= 0) w.splice(i, 1);
+  else w.push({ key, name: name || key, added: todayISO() });
+  saveWatch(w);
+  return i < 0;  // true => now followed
+}
+function starLabel(on) { return on ? "★ Following" : "☆ Follow this member"; }
+
+// The "New from members you follow" card on Overview — reuses the alerts feed,
+// scoped to the watch list.
+function renderWatchFeed() {
+  const card = $("#watch-card");
+  if (!card) return;
+  const w = loadWatch();
+  if (!w.length) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  $("#watch-list").innerHTML = w.map(x =>
+    `<span class="watch-chip"><a href="#" class="member-link" data-member-key="${esc(x.key)}">${esc(x.name)}</a>` +
+    `<button class="watch-x" data-unwatch-key="${esc(x.key)}" data-unwatch-name="${esc(x.name)}" ` +
+    `title="Unfollow ${esc(x.name)}" aria-label="Unfollow ${esc(x.name)}">×</button></span>`).join("");
+  const last = localStorage.getItem(VISIT_KEY);
+  const params = new URLSearchParams();
+  if (last) params.set("since", last);
+  params.set("members", w.map(x => x.key).join(","));
+  $("#watch-since").textContent = last ? `since ${last}` : "last 7 days";
+  const body = $("#watch-feed");
+  body.innerHTML = '<p class="loading">Checking filings from members you follow&hellip;</p>';
+  fetch("/api/alerts?" + params.toString()).then(r => r.json()).then(a => {
+    if (a.error) throw new Error(a.error);
+    renderAlerts(body, a);
+  }).catch(e => { body.innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+}
+
+// Follow toggle (on the member profile) + unfollow (chips on the Overview card).
+document.addEventListener("click", e => {
+  const star = e.target.closest && e.target.closest("[data-follow-key]");
+  if (star) {
+    e.preventDefault();
+    const on = toggleWatch(star.dataset.followKey, star.dataset.followName);
+    star.setAttribute("aria-pressed", String(on));
+    star.textContent = starLabel(on);
+    renderWatchFeed();
+    return;
+  }
+  const x = e.target.closest && e.target.closest("[data-unwatch-key]");
+  if (x) {
+    e.preventDefault();
+    toggleWatch(x.dataset.unwatchKey, x.dataset.unwatchName);
+    renderWatchFeed();
+    const star2 = document.querySelector(`.star-btn[data-follow-key="${CSS.escape(x.dataset.unwatchKey)}"]`);
+    if (star2) { star2.setAttribute("aria-pressed", "false"); star2.textContent = starLabel(false); }
+  }
+});
 
 // ------------------------------------------------ ingestion status banner --
 let _statusTimer = null;
 function pollStatus() {
   fetch("/api/status").then(r => r.json()).then(s => {
+    renderHeroStats(s);
     const banner = $("#ingest-banner");
     if (s.ingesting) {
       banner.classList.remove("hidden");
@@ -525,10 +809,10 @@ async function loadSignals() {
         <div class="signal-head">
           <div class="signal-rank">#${i + 1}</div>
           <div class="signal-id">
-            <div><span class="ticker big">${esc(s.ticker)}</span> <span class="sub">${esc(s.name)}</span></div>
+            <div><a href="#" class="ticker big tickerlink" data-ticker="${esc(s.ticker)}">${esc(s.ticker)}</a> <span class="sub">${esc(s.name)}</span></div>
             <div class="meta">${s.sector ? esc(s.sector) + " · sector ETFs to research: " + esc(s.sector_etfs) : "sector untracked"}</div>
           </div>
-          <div class="score-badge" title="Attention score out of 100">${s.score}<span class="score-of">/100</span></div>
+          <a href="#" class="score-badge" data-ticker="${esc(s.ticker)}" title="Open the ${esc(s.ticker)} scorecard">${s.score}<span class="score-of">/100</span></a>
         </div>
         ${verdictHTML(s.verdict || { level: "mixed", headline: "Mixed", tagline: "" })}
         ${storyHTML(s, d.spx_r3m)}
@@ -545,6 +829,7 @@ async function loadSignals() {
             &plusmn;1 per percentage point vs the S&P 500).</p>
         </details>
         <div class="signal-foot">
+          <button class="ghost" data-ticker="${esc(s.ticker)}">Open scorecard</button>
           <button class="ghost" data-goto-trades="${esc(s.ticker)}">See the actual trades &rarr;</button>
         </div>
       </div>`;
@@ -604,7 +889,7 @@ async function runTradeSearch() {
     tbody.innerHTML = d.trades.map(t =>
       `<tr><td>${memberCell(t)}</td>` +
       `<td>${esc(t.chamber)}</td>` +
-      `<td class="ticker"><a href="#" class="tickerlink" data-goto-trades="${esc(t.ticker)}">${esc(t.ticker)}</a></td>` +
+      `<td class="ticker"><a href="#" class="tickerlink" data-ticker="${esc(t.ticker)}">${esc(t.ticker)}</a></td>` +
       `<td>${esc(t.asset)}</td>` +
       `<td class="${t.side === "BUY" ? "side-buy" : t.side === "SELL" ? "side-sell" : ""}">${esc(t.side)}</td>` +
       `<td class="num">${esc(t.traded)}</td>` +
@@ -632,7 +917,7 @@ function tickerBarsHTML(rows) {
   const maxC = Math.max(...rows.map(r => r.count));
   return rows.map(r =>
     `<div class="hbar-row" title="${r.count} trade(s) by ${r.members} member(s), est. total ${fmtUSD(r.est_total)}">` +
-    `<a class="hbar-tick tickerlink" href="#" data-goto-trades="${esc(r.ticker)}">${esc(r.ticker)}</a>` +
+    `<a class="hbar-tick tickerlink" href="#" data-ticker="${esc(r.ticker)}">${esc(r.ticker)}</a>` +
     `<span class="hbar-track"><span class="hbar-fill" style="width:${(r.count / maxC) * 100}%"></span></span>` +
     `<span class="hbar-val">${r.count}× · est ${fmtUSD(r.est_total)}</span></div>`).join("");
 }
@@ -846,11 +1131,18 @@ $("#plan-import-file").addEventListener("change", async e => {
 });
 
 // ------------------------------------------------------------------ init --
-// Deep links: #signals, #trades, … open a tab; #member=<key> opens a profile.
+// Deep links: #signals … open a tab; #member=<key> a profile; #ticker=<SYM> a
+// scorecard; #compare=<A>,<B> a two-ticker comparison.
 function routeFromHash() {
   const h = decodeURIComponent((location.hash || "").slice(1));
   if (!h) return;
   if (h.indexOf("member=") === 0) { openMember(h.slice(7)); return; }
+  if (h.indexOf("ticker=") === 0) { openTicker(h.slice(7)); return; }
+  if (h.indexOf("compare=") === 0) {
+    const parts = h.slice(8).split(",");
+    openCompare(parts[0], parts[1]);
+    return;
+  }
   if ($(`.tab[data-tab="${h}"]`)) activateTab(h);
 }
 window.addEventListener("hashchange", routeFromHash);

@@ -795,6 +795,72 @@ def member_profile(key):
     }
 
 
+def ticker_detail(symbol):
+    """One ticker: full-database congressional buy/sell volume + (if it is a
+    current top signal) the existing Signals score. Re-presentation only — no new
+    scoring is invented here."""
+    symbol = (symbol or "").upper().strip()
+    if not symbol:
+        return {"error": "no ticker specified"}
+    conn = db()
+    rows = conn.execute(
+        "SELECT side, COUNT(*) n, SUM((amount_low+amount_high)/2) est,"
+        " COUNT(DISTINCT member_key) members"
+        " FROM trades WHERE ticker=? GROUP BY side", (symbol,)).fetchall()
+    if not rows:
+        conn.close()
+        return {"error": "No congressional trades on record for {}.".format(symbol)}
+    by_side = {r["side"]: r for r in rows}
+
+    def side(s):
+        r = by_side.get(s)
+        return {"trades": r["n"] if r else 0,
+                "est_volume": int(r["est"] or 0) if r else 0,
+                "members": r["members"] if r else 0}
+
+    top_members = [dict(r) for r in conn.execute(
+        "SELECT member, member_key, COUNT(*) n,"
+        " SUM(CASE WHEN side='BUY'  THEN (amount_low+amount_high)/2 ELSE 0 END) buy_est,"
+        " SUM(CASE WHEN side='SELL' THEN (amount_low+amount_high)/2 ELSE 0 END) sell_est"
+        " FROM trades WHERE ticker=? GROUP BY member_key"
+        " ORDER BY n DESC, buy_est DESC LIMIT 8", (symbol,)).fetchall()]
+    recent = [_row(r) for r in conn.execute(
+        "SELECT member,member_key,state,chamber,ticker,asset,side,owner,traded,"
+        "traded_key,amount_low,amount_high,doc_url FROM trades"
+        " WHERE ticker=? ORDER BY traded_key DESC, id DESC LIMIT 40", (symbol,)).fetchall()]
+    tot = conn.execute(
+        "SELECT COUNT(*) n, COUNT(DISTINCT member_key) m,"
+        " MIN(traded_key) f, MAX(traded_key) l FROM trades WHERE ticker=?",
+        (symbol,)).fetchone()
+    conn.close()
+
+    sig, spx_r3m = None, None
+    try:
+        sigs = mem_cached(_v("signals"), 900, build_signals)
+        spx_r3m = sigs.get("spx_r3m")
+        sig = next((s for s in sigs.get("signals", []) if s["ticker"] == symbol), None)
+    except Exception:
+        pass
+
+    asset = recent[0]["asset"] if recent else symbol
+    first_k = tot["f"] if tot["f"] and tot["f"] > "0000-00-00" else ""
+    return {
+        "ticker": symbol,
+        "asset": asset,
+        "name": (sig or {}).get("name") or asset or symbol,
+        "sector": (sig or {}).get("sector"),
+        "buy": side("BUY"),
+        "sell": side("SELL"),
+        "totals": {"trades": tot["n"], "members": tot["m"],
+                   "first_trade": first_k, "last_trade": tot["l"] or ""},
+        "top_members": top_members,
+        "trades": recent,
+        "signal": sig,          # null when not a current top-14 signal
+        "spx_r3m": spx_r3m,
+        "window_days": SIGNAL_WINDOW_DAYS,
+    }
+
+
 # ----------------------------------------------------------------- bills ----
 
 def tag_sectors(text):
@@ -1120,30 +1186,45 @@ def build_brief():
 
 # ---------------------------------------------------------------- alerts ----
 
-def build_alerts(since):
-    """What changed in the trade database since `since` (YYYY-MM-DD)."""
+def build_alerts(since, members=None):
+    """What changed in the trade database since `since` (YYYY-MM-DD). When
+    `members` (a list of member_keys) is given, every count is scoped to just
+    those members — this backs the "members you follow" feed."""
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", since or ""):
         since = _window_key(7)
+    keys = [k for k in (members or []) if k][:100]
+    mf = ""                       # member filter, on the `t.` alias
+    ff = ""                       # member filter, on the bare `filings` table
+    mp = []                       # its bound params (reused per query)
+    if keys:
+        placeholders = ",".join("?" * len(keys))
+        mf = " AND t.member_key IN (%s)" % placeholders
+        ff = " AND member_key IN (%s)" % placeholders
+        mp = keys
+
     conn = db()
     filings = conn.execute(
-        "SELECT COUNT(*) c FROM filings WHERE filed_key >= ?", (since,)).fetchone()["c"]
+        "SELECT COUNT(*) c FROM filings WHERE filed_key >= ?" + ff,
+        [since] + mp).fetchone()["c"]
     trows = [_row(r) for r in conn.execute(
         "SELECT t.member,t.member_key,t.state,t.chamber,t.ticker,t.asset,t.side,"
         "t.traded,t.amount_low,t.amount_high,t.doc_url, f.filed_key"
         " FROM trades t JOIN filings f ON t.filing_id=f.id"
-        " WHERE f.filed_key >= ? ORDER BY (t.amount_low+t.amount_high) DESC, f.filed_key DESC"
-        " LIMIT 40", (since,)).fetchall()]
+        " WHERE f.filed_key >= ?" + mf +
+        " ORDER BY (t.amount_low+t.amount_high) DESC, f.filed_key DESC"
+        " LIMIT 40", [since] + mp).fetchall()]
     total_new = conn.execute(
         "SELECT COUNT(*) c FROM trades t JOIN filings f ON t.filing_id=f.id"
-        " WHERE f.filed_key >= ?", (since,)).fetchone()["c"]
+        " WHERE f.filed_key >= ?" + mf, [since] + mp).fetchone()["c"]
 
-    def top(side):
+    def top(s):
         rows = conn.execute(
             "SELECT t.ticker, COUNT(*) count, SUM((t.amount_low+t.amount_high)/2) est_total,"
             " COUNT(DISTINCT t.member_key) members"
             " FROM trades t JOIN filings f ON t.filing_id=f.id"
-            " WHERE f.filed_key >= ? AND t.side=? GROUP BY t.ticker"
-            " ORDER BY count DESC, est_total DESC LIMIT 6", (since, side)).fetchall()
+            " WHERE f.filed_key >= ? AND t.side=?" + mf + " GROUP BY t.ticker"
+            " ORDER BY count DESC, est_total DESC LIMIT 6",
+            [since, s] + mp).fetchall()
         return [dict(r) for r in rows]
     top_buys, top_sells = top("BUY"), top("SELL")
     conn.close()
@@ -1222,14 +1303,24 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "no member specified"}, 400)
                     return
                 self.send_json(member_profile(key))
+            elif path == "/api/ticker":
+                symbol = (qs.get("symbol") or [""])[0]
+                if not SYMBOL_RE.match(symbol or ""):
+                    self.send_json({"error": "bad ticker"}, 400)
+                    return
+                key = "ticker_{}".format(re.sub(r"[^A-Za-z0-9]", "_", symbol.upper()))
+                self.send_json(mem_cached(_v(key), 300,
+                                          lambda: ticker_detail(symbol)))
             elif path == "/api/signals":
                 self.send_json(mem_cached(_v("signals"), 900, build_signals))
             elif path == "/api/brief":
                 self.send_json(mem_cached(_v("brief"), 900, build_brief))
             elif path == "/api/alerts":
                 since = (qs.get("since") or [""])[0]
-                self.send_json(mem_cached(_v("alerts_" + since), 300,
-                                          lambda: build_alerts(since)))
+                members = [m for m in (qs.get("members") or [""])[0].split(",") if m][:100]
+                ckey = _v("alerts_" + since + "|" + ",".join(sorted(members)))
+                self.send_json(mem_cached(ckey, 300,
+                                          lambda: build_alerts(since, members)))
             elif path == "/api/bills":
                 self.send_json(mem_cached("bills", 1800, build_bills))
             elif path == "/api/news":
